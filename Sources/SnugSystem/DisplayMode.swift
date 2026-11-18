@@ -1,7 +1,9 @@
 // 显示模式：读此刻是哪一档，以及帮手进程里真正去切（手机屏换档、把被 macOS 拨动的别的屏设回去）。
 // 主程序不亲自切模式：亲自切过模式的进程，这块虚拟屏释放后要拖 40 秒以上才下线（两次实测）；
 // 交给短命的帮手进程（Snug --set-mode / --restore-mode）切完就退出，释放照样 0.1 秒下线
+import CGVirtualDisplayBridge
 import CoreGraphics
+import Foundation
 import SnugCore
 
 public enum DisplayMode {
@@ -92,19 +94,22 @@ public enum DisplayMode {
     }
 
     /// 帮手进程里调用：把屏的旋转设到 degrees（度，只认 0/90/180/270）。和 apply 分开调：
-    /// 设回时先设模式、再设旋转（模式一换，旋转可能跟着被拨回 0°）
+    /// 设回时先设模式、再设旋转（模式一换，旋转可能跟着被拨回 0°）。
+    /// 没有公开 API 能设旋转（`CGConfigureDisplayRotation` 不存在）：走私有框架 MonitorPanel 的
+    /// MPDisplay（displayplacer 同款做法），它按系统设置里改旋转的同一条路下发，所以 session 与
+    /// permanent 两种范围效果相同（都落到系统配置），permanently 只为与模式恢复共用一套参数而留。
+    /// 旋转不是瞬时生效：下发后轮询 CGDisplayRotation，最多等 10 秒；类不在或超时都如实返回失败，
+    /// 调用方只记日志、不卡撤屏
     public static func applyRotation(_ degrees: Double, to id: DisplayID, permanently: Bool) -> Outcome {
-        var config: CGDisplayConfigRef?
-        let begin = CGBeginDisplayConfiguration(&config)
-        guard begin == .success else { return .failed(begin) }
-        let staged = CGConfigureDisplayRotation(config, id, degrees)
-        guard staged == .success else {
-            CGCancelDisplayConfiguration(config)
-            return .failed(staged)
+        if NSClassFromString("MPDisplay") == nil {
+            Bundle(path: "/System/Library/PrivateFrameworks/MonitorPanel.framework")?.load()
         }
-        let done = CGCompleteDisplayConfiguration(config, permanently ? .permanently : .forSession)
-        if done != .success { CGCancelDisplayConfiguration(config) }
-        return done == .success ? .switched : .failed(done)
+        guard let display = MPDisplay(displayID: id) else { return .unavailable }
+        display.setOrientation(NSInteger(degrees))
+        for _ in 0 ..< 100 where CGDisplayRotation(id) != degrees {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return CGDisplayRotation(id) == degrees ? .switched : .failed(.failure)
     }
 }
 

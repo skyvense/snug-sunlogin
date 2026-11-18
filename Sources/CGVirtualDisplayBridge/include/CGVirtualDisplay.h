@@ -40,4 +40,13 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) CGDirectDisplayID displayID;
 @end
 
+//  MPDisplay 私有 API 声明（MonitorPanel 私有框架）：设置显示器旋转——公开 API 只有读（CGDisplayRotation），没有写
+//  来源：displayplacer (MIT) https://github.com/jakehilborn/displayplacer 的 src/MonitorPanel.m 同款用法：
+//  initWithDisplayID 拿到这块屏，setOrientation 传角度（0/90/180/270），生效要轮询 CGDisplayRotation 等
+//  框架不在链接期引入：运行时先 NSClassFromString 找类，找不到再按路径加载；类不在就当这条机制不可用
+@interface MPDisplay : NSObject
+- (nullable instancetype)initWithDisplayID:(CGDirectDisplayID)displayID;
+- (void)setOrientation:(NSInteger)orientation;
+@end
+
 NS_ASSUME_NONNULL_END
