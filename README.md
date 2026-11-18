@@ -15,6 +15,11 @@ macOS 14+ · 基于 [Snug](https://github.com/zephyr4123/snug)（UU远程 版）
 > ⚠️ **移植初版，未经实机验证。** 这份代码在没有 macOS 的环境里完成移植，尚未编译、未上真机。
 > 适配点、候选值与定版步骤全部写在 [PORTING.md](PORTING.md)，动手前请先读它。
 
+> **来源说明：本项目从原作者的代码修改而来。** 原项目是 [zephyr4123](https://github.com/zephyr4123) 的
+> [Snug](https://github.com/zephyr4123/snug)（为 UU远程 打造，其前身为 AoyamaShou 的
+> [UUyc-companion](https://github.com/aoyamashou/UUyc-companion)）。本分支在其代码基础上把远程通道
+> 适配为向日葵，遵循 MIT 许可证，原作者的版权声明保留于 [LICENSE](LICENSE)，逐项改动见 [PORTING.md](PORTING.md)。
+
 ## 这是什么
 
 原版 Snug 为网易 UU远程 打造：手机远程连上 Mac 时，它给 Mac 加一块与手机同比例的竖屏，
