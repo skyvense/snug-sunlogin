@@ -56,7 +56,7 @@ public struct PhoneChoice: Codable, Equatable, Sendable {
         self.init(model: model.id, screen: model.screen)
     }
 
-    /// 没选过时用的：手机屏最早就是在这台上调出来的（540×950）。必须和机型库里的那一条一致（有测试盯着）
+    /// 没选过时用的：手机屏最早就是在这台上调出来的（向日葵全屏下 540×1173）。必须和机型库里的那一条一致（有测试盯着）
     public static let standard = PhoneChoice(model: "Apple iPhone 17 Pro Max", screen: PhoneScreen(width: 1320, height: 2868, points: 440))
 }
 
