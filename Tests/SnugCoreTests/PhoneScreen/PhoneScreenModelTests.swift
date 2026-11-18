@@ -9,7 +9,7 @@ struct PhoneScreenSpecTests {
     func millimeters() {
         let mm = PhoneScreenSpec.millimeters
         #expect(abs(mm.width - 2160.0 / 220 * 25.4) < 0.001)
-        #expect(abs(mm.height - 4320.0 / 220 * 25.4) < 0.001)
+        #expect(abs(mm.height - 4860.0 / 220 * 25.4) < 0.001)
     }
 
     @Test("一个固定身份，外加两个备用，互不重复")

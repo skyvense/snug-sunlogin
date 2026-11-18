@@ -2,10 +2,12 @@ import Foundation
 import Testing
 @testable import SnugCore
 
-/// 夹具来自 2026-11-12 本机 `log show --style ndjson --predicate 'process == "AweSun" …'`，
+/// 夹具正文来自 2026-11-12 的 ScreenCaptureKit / VideoToolbox 框架日志（这类行与打日志的进程无关），
+/// 进程路径已换成向日葵实机核对过的推流进程（2026-11-18 发现报告）：
+/// /Applications/AweSun.app/Contents/Helpers/AweSun_Desktop.app/Contents/MacOS/AweSun_Desktop
 /// 只保留时间、类型、子系统、进程路径和消息正文，不含 IP、用户名、主目录路径
 private func fixture(_ name: String) throws -> [String] {
-    guard let url = Bundle.module.url(forResource: "uuremoteserver-\(name)", withExtension: "ndjson", subdirectory: "Fixtures") else {
+    guard let url = Bundle.module.url(forResource: "awesun-desktop-\(name)", withExtension: "ndjson", subdirectory: "Fixtures") else {
         throw CocoaError(.fileNoSuchFile)
     }
     return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map(String.init)
@@ -37,7 +39,7 @@ private func activity(_ name: String, at probes: [String]) throws -> [String: Bo
     return result
 }
 
-private func message(_ text: String, process: String = "/Applications/Sunlogin.app/Contents/Helpers/AweSun",
+private func message(_ text: String, process: String = "/Applications/AweSun.app/Contents/Helpers/AweSun_Desktop.app/Contents/MacOS/AweSun_Desktop",
                      at time: String = "19:01:43.417100", processID: Int? = nil) -> String {
     var obj: [String: Any] = ["timestamp": "2026-11-12 \(time)-0800", "processImagePath": process, "eventMessage": text]
     obj["processID"] = processID
@@ -70,7 +72,7 @@ struct CaptureLogTests {
         let p = CaptureLogParser()
         #expect(p.parse(line: message(" [ERROR] -[SCStream stopCaptureWithCompletionHandler:]_block_invoke_2:995 error=Error Domain=x Code=-3808")) == nil)
         #expect(p.parse(line: message(" [INFO] -[SCStream startCaptureWithCompletionHandler:]:939 0x1", process: "/usr/libexec/other")) == nil)
-        #expect(p.parse(line: "Filtering the log data using \"process == AweSun\"") == nil)
+        #expect(p.parse(line: "Filtering the log data using \"process == AweSun_Desktop\"") == nil)
         #expect(p.parse(line: #"{"count":28,"finished":1}"#) == nil)
         #expect(p.parse(line: message("CGSDisplayNotifyProc: got notification kCGSDisplayWillReconfigure")) == nil)
     }
@@ -263,6 +265,6 @@ struct CaptureLogTests {
             #expect(CaptureLogParser.classify(text) != nil)
             #expect(CaptureLogParser.keywords.contains { text.contains($0) })
         }
-        #expect(CaptureLogParser.predicate.hasPrefix("process == \"AweSun\" AND ("))
+        #expect(CaptureLogParser.predicate.hasPrefix("process == \"AweSun_Desktop\" AND ("))
     }
 }
