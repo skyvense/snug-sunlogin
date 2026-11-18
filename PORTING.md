@@ -27,6 +27,7 @@ Snug 不接入远程软件的任何接口，只观察它在本机留下的三路
 | 9 | 改名与隔离 | 类型/文件以 UU 命名；数据目录 `Application Support/Snug` | 类型与文件改名 `Sunlogin*`；数据目录 `SnugSunlogin`、日志 `SnugSunlogin.log`、App bundle id 改为 `io.github.skyvense.snugsunlogin` | 已改：可与原版 Snug 同机共存，授权与数据互不干扰 |
 | 10 | 更新源 `UpdateSource` | 作者腾讯云 / 上游 GitHub | 腾讯云一项改为失效地址（`example.invalid`），GitHub 改指 `skyvense/snug-sunlogin`（占位） | 已改：移植版绝不会被上游原版的更新包覆盖 |
 | 11 | 旧版伴侣冲突检测 `LegacyApp` | 检测 UU 时代的 `com.corndog.uudisplay` | 保持原样 | 在本分支永不触发，属休眠代码，后续可删 |
+| 12 | 竖屏旋转的保存与还原 `DisplayMode.rotation` / `ModeTarget.rotation` | 上游只记别的屏的模式（分辨率/缩放/刷新率），不记旋转 | 加屏、撤屏前记下每块别的屏的旋转（`CGDisplayRotation`），换完先设回模式、再设回旋转（`CGConfigureDisplayRotation`，帮手进程 `--restore-rotation`）；远程结束写永久配置时，旋转非 0° 的屏也一起写 | **未验证**：本机无 macOS，未编译；`CGConfigureDisplayRotation` 能否在 Swift 里直接调、设旋转后模式是否跟着变，都待 `scripts/snug check` 与实机加/撤屏确认 |
 
 代码与文档里凡由改名产生的「向日葵会如何如何」的描述（尤其是注释中关于推流、重选屏幕的），
 在实机核对前都应当作**从 UU 继承的假设**，不是已证实的向日葵行为。
@@ -49,6 +50,9 @@ Snug 不接入远程软件的任何接口，只观察它在本机留下的三路
    **前置未知数**：向日葵 Mac 被控端是否枚举并允许切换到虚拟显示器（多屏支持），这是整个方案成立的前提，
    第一次连接时最先确认这一点。
 5. **校准比例**：画面有黑边或被工具栏遮挡时，调 `ScreenFit.sunloginInset`（#6）。
+6. **验竖屏旋转**（一横一竖多屏，#12）：加手机屏前后、撤屏后，竖屏应一直保持 90°/270°。
+   若撤屏后竖屏被转回横向，看日志里「加屏/撤屏前别的屏」一行记的旋转、以及设回旋转的帮手退出码；
+   旋转设不回去只记日志，不会卡住撤屏。
 
 ## 已知风险与限制（继承自上游，另加向日葵特有项）
 

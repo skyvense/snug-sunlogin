@@ -483,8 +483,9 @@ public final class PhoneDesk {
             let others = self.displays.otherDisplays()
             guard !others.contains(where: \.asleep) else { return }
             self.persistOwed = false
-            Log.info("远程中撤过屏，远程结束后把别的屏此刻的模式写进永久配置：\(others.map { "\($0.name) \($0.mode)" }.joined(separator: "、"))")
+            Log.info("远程中撤过屏，远程结束后把别的屏此刻的模式写进永久配置：\(others.map { "\($0.name) \($0.mode)\($0.rotation == 0 ? "" : " 旋转 \($0.rotation)°")" }.joined(separator: "、"))")
             for other in others { await self.displays.setMode(other.id, other.mode, permanently: true) }
+            for other in others where other.rotation != 0 { await self.displays.setRotation(other.id, other.rotation, permanently: true) }
         }
     }
 
@@ -638,24 +639,31 @@ public final class PhoneDesk {
         var permanently: Bool
     }
 
-    /// 记下来，别的屏的模式也写进日志：出了问题能分清是换屏幕组合时被拨动的，还是之前就是这样
+    /// 记下来，别的屏的模式和旋转也写进日志：出了问题能分清是换屏幕组合时被拨动的，还是之前就是这样
     private func surroundings(before change: String) async -> Surroundings {
         let others = displays.otherDisplays()
-        Log.info("\(change)前别的屏：\(others.isEmpty ? "没有" : others.map { "\($0.name) \($0.mode)" }.joined(separator: "、"))")
+        Log.info("\(change)前别的屏：\(others.isEmpty ? "没有" : others.map { "\($0.name) \($0.mode)\($0.rotation == 0 ? "" : " 旋转 \($0.rotation)°")" }.joined(separator: "、"))")
         return Surroundings(windows: await windows.snapshot(), others: others)
     }
 
     /// 屏幕组合换完（新屏上线、旧屏下线）后放回：先设回被拨动的屏（模式连分辨率一起变时会再挪窗口），
+    /// 旋转也一样设回（竖屏被转回横向时，模式的宽高可能看着没变，只剩旋转变了）；先设模式、再设旋转，
     /// 等系统挪完，再放回被挪动的窗口。这期间拔掉、新接上的屏不碰
     private func settle(_ before: Surroundings, after change: String, permanently: Bool) async {
         await timeline.sleep(Self.topologySettle)
-        let now = Dictionary(displays.otherDisplays().map { ($0.id, $0.mode) }, uniquingKeysWith: { first, _ in first })
+        let current = displays.otherDisplays()
+        let now = Dictionary(current.map { ($0.id, $0.mode) }, uniquingKeysWith: { first, _ in first })
         let drifted = before.others.compactMap { was in now[was.id].flatMap { $0.isSame(as: was.mode) ? nil : (was, $0) } }
-        if !drifted.isEmpty {
-            let detail = drifted.map { was, now in "\(was.name) \(was.mode) → \(now)" }.joined(separator: "、")
-            Log.info("\(change)时 macOS 把别的屏拨成了它给这组屏幕记的模式（\(detail)），设回\(change)前的样子")
+        let nowRotation = Dictionary(current.map { ($0.id, $0.rotation) }, uniquingKeysWith: { first, _ in first })
+        let rotationDrifted = before.others.compactMap { was in nowRotation[was.id].flatMap { abs($0 - was.rotation) > 0.01 ? (was, $0) : nil } }
+        if !drifted.isEmpty || !rotationDrifted.isEmpty {
+            var parts: [String] = []
+            if !drifted.isEmpty { parts.append(drifted.map { was, now in "\(was.name) \(was.mode) → \(now)" }.joined(separator: "、")) }
+            if !rotationDrifted.isEmpty { parts.append(rotationDrifted.map { was, now in "\(was.name) 旋转 \(now)° → \(was.rotation)°" }.joined(separator: "、")) }
+            Log.info("\(change)时 macOS 把别的屏拨成了它给这组屏幕记的模式（\(parts.joined(separator: "；"))），设回\(change)前的样子")
             onTopologyChange?()
             for (was, _) in drifted { await displays.setMode(was.id, was.mode, permanently: permanently) }
+            for (was, _) in rotationDrifted { await displays.setRotation(was.id, was.rotation, permanently: permanently) }
             await timeline.sleep(Self.topologySettle)
         }
         await windows.restore(before.windows, except: placement?.window.key)

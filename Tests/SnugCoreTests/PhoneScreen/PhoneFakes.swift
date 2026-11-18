@@ -40,8 +40,12 @@ final class FakeDisplays: PhoneDisplays {
     private(set) var fits: [DisplayID: ScreenFit] = [:]
     /// 别的屏此刻的模式。在 onCreate / onRetire 里改它，模拟 macOS 换屏幕组合时把别的屏拨回它记的模式
     var others: [DisplayID: ScreenMode] = [:]
+    /// 别的屏此刻的旋转角度（度）。在 onCreate / onRetire 里改它，模拟 macOS 把竖屏转回横向
+    var rotations: [DisplayID: Double] = [:]
     /// 设模式不成（帮手失败）：屏还是被拨动后的模式
     var modeFails = false
+    /// 设旋转不成（帮手失败）：屏还是被拨动后的旋转
+    var rotationFails = false
     /// 释放后不下线（显示器睡着时要等唤醒）：goOffline 才真下线，onRetire 那时才发生
     var staysOnline = false
     private(set) var lingering: Set<DisplayID> = []
@@ -126,13 +130,19 @@ final class FakeDisplays: PhoneDisplays {
     func mainArea() -> CGRect? { Self.main }
 
     func otherDisplays() -> [OtherDisplay] {
-        others.sorted { $0.key < $1.key }.map { OtherDisplay(id: $0.key, name: "屏 \($0.key)", mode: $0.value, asleep: asleep.contains($0.key)) }
+        others.sorted { $0.key < $1.key }.map { OtherDisplay(id: $0.key, name: "屏 \($0.key)", mode: $0.value, rotation: rotations[$0.key] ?? 0, asleep: asleep.contains($0.key)) }
     }
 
     func setMode(_ id: DisplayID, _ mode: ScreenMode, permanently: Bool) async {
         journal.add("mode \(id) \(mode)\(permanently ? " 永久" : "")")
         guard !modeFails, others[id] != nil else { return }
         others[id] = mode
+    }
+
+    func setRotation(_ id: DisplayID, _ degrees: Double, permanently: Bool) async {
+        journal.add("rotation \(id) \(degrees)\(permanently ? " 永久" : "")")
+        guard !rotationFails, others[id] != nil else { return }
+        rotations[id] = degrees
     }
 }
 

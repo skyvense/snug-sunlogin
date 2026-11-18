@@ -31,6 +31,9 @@ public protocol PhoneDisplays: AnyObject {
     func otherDisplays() -> [OtherDisplay]
     /// 把一块别的屏设回这个模式（交给帮手进程），permanently 时连永久配置一起写。设不成只记日志
     func setMode(_ id: DisplayID, _ mode: ScreenMode, permanently: Bool) async
+    /// 把一块别的屏的旋转设回这个角度（度，只认 0/90/180/270，交给帮手进程），permanently 时连永久配置一起写。
+    /// 设不成只记日志；和 setMode 分开调：设回时先设模式、再设旋转
+    func setRotation(_ id: DisplayID, _ degrees: Double, permanently: Bool) async
 }
 
 /// 窗口此刻的样子

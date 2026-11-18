@@ -36,6 +36,8 @@ public enum LaunchMode: Equatable, Sendable {
       --set-mode <屏幕编号> <宽> <高>   把手机屏换到这一档（点，2 倍）（主程序内部用）
       --restore-mode <屏幕编号> <模式编号> <宽> <高> <像素宽> <像素高> <刷新率> session|permanent
                                       把一块屏设回这个模式，只对本次登录或连永久配置（主程序内部用）
+      --restore-rotation <屏幕编号> <角度> session|permanent
+                                      把一块屏的旋转设回这个角度（0/90/180/270），只对本次登录或连永久配置（主程序内部用）
     """
 
     public static func parse(_ arguments: [String]) throws -> LaunchMode {
@@ -66,6 +68,11 @@ public enum LaunchMode: Equatable, Sendable {
             guard let r = Double(raw), r.isFinite, r >= 0 else { throw LaunchModeError.invalidNumber(flag, raw) }
             return r
         }
+        func angle() throws -> Double {
+            let raw = try value()
+            guard let a = Double(raw), [0.0, 90.0, 180.0, 270.0].contains(a) else { throw LaunchModeError.invalidNumber(flag, raw) }
+            return a
+        }
         if flag.hasPrefix("--render-"), let target = RenderTarget(rawValue: String(flag.dropFirst("--render-".count))) {
             return .render(target, output: URL(fileURLWithPath: try value()))
         }
@@ -91,6 +98,12 @@ public enum LaunchMode: Equatable, Sendable {
             let scope = try value()
             guard [ModeTarget.permanent, ModeTarget.session].contains(scope) else { throw LaunchModeError.invalidNumber(flag, scope) }
             return .setMode(display: display, to: .exact(mode, permanently: scope == ModeTarget.permanent))
+        case "--restore-rotation":
+            let display = try number(DisplayID.self)
+            let degrees = try angle()
+            let scope = try value()
+            guard [ModeTarget.permanent, ModeTarget.session].contains(scope) else { throw LaunchModeError.invalidNumber(flag, scope) }
+            return .setMode(display: display, to: .rotation(degrees: degrees, permanently: scope == ModeTarget.permanent))
         default:
             throw LaunchModeError.unknownFlag(flag)
         }

@@ -25,6 +25,11 @@ public enum DisplayMode {
         CGDisplayCopyDisplayMode(id).map(ScreenMode.init)
     }
 
+    /// 此刻的旋转角度（度，顺时针为正；屏不在了返回 0）
+    public static func rotation(_ id: DisplayID) -> Double {
+        CGDisplayRotation(id)
+    }
+
     /// 此刻 2 倍模式的宽度（点）；不是 2 倍、或屏不在了返回 nil
     public static func hiDPIWidth(_ id: DisplayID) -> Int? {
         guard let mode = current(id), mode.pixelWidth == 2 * mode.width else { return nil }
@@ -53,6 +58,7 @@ public enum DisplayMode {
         switch target {
         case .hiDPI(let width, let height):
             return modes.first { $0.width == width && $0.height == height && $0.pixelWidth == 2 * width }
+        case .rotation: return nil // 旋转不按模式找：apply 开头已分流
         case .exact(let mode, _):
             // 属性相同的可能有好几档：挑回原来那个编号，编号重排了就挑能当桌面用的那一档
             let same = modes.filter { ScreenMode($0).isSame(as: mode) }
@@ -63,10 +69,14 @@ public enum DisplayMode {
     /// 帮手进程里调用：把屏切到 target。手机屏换档只对本次登录生效；设回别的屏按 target 要求，
     /// 连永久配置时写的是 WindowServer 的永久配置（屏幕组合一变，它会把套用来的旧模式存进去：日志「Saving configuration: session, permanent store」）
     public static func apply(_ target: ModeTarget, to id: DisplayID) -> Outcome {
+        if case .rotation(let degrees, let permanently) = target {
+            return applyRotation(degrees, to: id, permanently: permanently)
+        }
         guard let mode = find(target, on: id) else { return .unavailable }
         let scope: CGConfigureOption = switch target {
         case .hiDPI: .forSession
         case .exact(_, let permanently): permanently ? .permanently : .forSession
+        case .rotation: .forSession // 走不到：上面已分流到 applyRotation
         }
         var config: CGDisplayConfigRef?
         let begin = CGBeginDisplayConfiguration(&config)
@@ -77,6 +87,22 @@ public enum DisplayMode {
             return .failed(staged)
         }
         let done = CGCompleteDisplayConfiguration(config, scope)
+        if done != .success { CGCancelDisplayConfiguration(config) }
+        return done == .success ? .switched : .failed(done)
+    }
+
+    /// 帮手进程里调用：把屏的旋转设到 degrees（度，只认 0/90/180/270）。和 apply 分开调：
+    /// 设回时先设模式、再设旋转（模式一换，旋转可能跟着被拨回 0°）
+    public static func applyRotation(_ degrees: Double, to id: DisplayID, permanently: Bool) -> Outcome {
+        var config: CGDisplayConfigRef?
+        let begin = CGBeginDisplayConfiguration(&config)
+        guard begin == .success else { return .failed(begin) }
+        let staged = CGConfigureDisplayRotation(config, id, degrees)
+        guard staged == .success else {
+            CGCancelDisplayConfiguration(config)
+            return .failed(staged)
+        }
+        let done = CGCompleteDisplayConfiguration(config, permanently ? .permanently : .forSession)
         if done != .success { CGCancelDisplayConfiguration(config) }
         return done == .success ? .switched : .failed(done)
     }
