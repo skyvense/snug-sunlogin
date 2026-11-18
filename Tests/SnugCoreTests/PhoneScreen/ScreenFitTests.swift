@@ -28,7 +28,7 @@ struct ScreenFitTests {
         #expect(longest.size(width: 1080).height * 2 == ScreenFit.maxPixels.height)
     }
 
-    @Test("比例 = 手机屏幕的高宽比扣掉上下各 91 点（UU 工具栏）；不知道逻辑宽度按 400 点估")
+    @Test("比例 = 手机屏幕的高宽比扣掉上下各 91 点（向日葵 工具栏）；不知道逻辑宽度按 400 点估")
     func ratio() {
         // 20:9 安卓 1080×2400：2.222 - 182/400 = 1.767
         let android = ScreenFit(phone: PhoneScreen(width: 1080, height: 2400))

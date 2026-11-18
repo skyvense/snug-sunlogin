@@ -64,9 +64,9 @@ struct LaunchModeTests {
         #expect(try LaunchMode.parse(ModeTarget.hiDPI(width: 540, height: 1170).arguments(display: 9)) == .setMode(display: 9, to: .hiDPI(width: 540, height: 1170)))
     }
 
-    @Test("--dump-uu、--preview-phone")
+    @Test("--dump-sunlogin、--preview-phone")
     func flags() throws {
-        #expect(try LaunchMode.parse(["--dump-uu"]) == .dumpUU)
+        #expect(try LaunchMode.parse(["--dump-sunlogin"]) == .dumpSunlogin)
         #expect(try LaunchMode.parse(["--preview-phone"]) == .previewPhone)
     }
 
@@ -77,8 +77,8 @@ struct LaunchModeTests {
         #expect(throws: LaunchModeError.missingValue("--set-mode")) { try LaunchMode.parse(["--set-mode", "14", "540"]) }
         #expect(throws: LaunchModeError.invalidNumber("--set-mode", "abc")) { try LaunchMode.parse(["--set-mode", "abc", "540", "950"]) }
         #expect(throws: LaunchModeError.invalidNumber("--set-mode", "0")) { try LaunchMode.parse(["--set-mode", "14", "0", "950"]) }
-        #expect(throws: LaunchModeError.conflicting("--dump-uu", "--render-about")) {
-            try LaunchMode.parse(["--dump-uu", "--render-about", "/tmp/out"])
+        #expect(throws: LaunchModeError.conflicting("--dump-sunlogin", "--render-about")) {
+            try LaunchMode.parse(["--dump-sunlogin", "--render-about", "/tmp/out"])
         }
     }
 

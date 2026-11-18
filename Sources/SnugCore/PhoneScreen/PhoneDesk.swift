@@ -69,7 +69,7 @@ public final class PhoneDesk {
         case noWindow(app: String)
         /// 请它退出了，等满了还没退，也没有对话框：可以强制退出
         case quitStalled(app: String, pid: Int32)
-        /// 换成了新手机的比例。UU 只在选屏时按屏幕尺寸开推流，比例变了要在 UU 里切走再切回来，点的位置才对（实测）
+        /// 换成了新手机的比例。向日葵 只在选屏时按屏幕尺寸开推流，比例变了要在 向日葵 里切走再切回来，点的位置才对（实测）
         case reshaped
         /// 换了手机型号，但这块屏没能换成新比例（还是原来的）；下次加屏时按新的建
         case reshapeFailed
@@ -142,7 +142,7 @@ public final class PhoneDesk {
     /// 确认 App 退完、窗口关上的那一刻，在撤掉「正在退出 / 正在关闭」之前：数据源据此马上去掉它，
     /// 不然要等下一轮刷新，卡片会以原样闪回一下
     public var onGone: ((Gone) -> Void)?
-    /// 即将加屏、撤屏，或把被拨动的别的屏设回去：会话层据此暂缓断开判定（屏幕一变，UU 的信号会抖一下）
+    /// 即将加屏、撤屏，或把被拨动的别的屏设回去：会话层据此暂缓断开判定（屏幕一变，向日葵 的信号会抖一下）
     public var onTopologyChange: (() -> Void)?
     /// 设置里的默认字号级数
     public private(set) var defaultZoom: Int
@@ -168,7 +168,7 @@ public final class PhoneDesk {
     /// 要等唤醒才下线（实测，可能是几小时后），等它真下线了再按撤屏前的样子放回（settleDisplays）
     private var retiring: Retiring?
     /// 远程中撤过屏：那时别的屏可能正处在远程用的临时模式，系统套用时连永久配置一起写了。
-    /// 远程结束（UU 已经还原）、手机屏不在、屏都醒着时，把别的屏此刻的模式写进永久配置
+    /// 远程结束（向日葵 已经还原）、手机屏不在、屏都醒着时，把别的屏此刻的模式写进永久配置
     private var persistOwed = false
     private var settling = false
     private var placement: Placement? {
@@ -224,7 +224,7 @@ public final class PhoneDesk {
 
     /// 手机屏上的「退出手机屏」：放回窗口、撤掉手机屏，直到不再要手机屏之前都不再加：这次远程结束、关了开关，
     /// 或者几台同时连着时手机离开超过重连窗口、只剩电脑（手机再回来算下一次，照常加）。
-    /// 没接显示器的 Mac 上，手机屏一出现系统就撤掉自己的默认屏，UU远程 里没有别的屏可切，靠它回到原来的画面（issue #8）。
+    /// 没接显示器的 Mac 上，手机屏一出现系统就撤掉自己的默认屏，向日葵 里没有别的屏可切，靠它回到原来的画面（issue #8）。
     /// 远程刚结束、屏还没撤完时点的不算：不然会挡掉下一次远程的手机屏
     public func dismissScreen() {
         guard wanted, !state.dismissed else { return }
@@ -610,7 +610,7 @@ public final class PhoneDesk {
         display = nil
         // 原本就在手机屏上的窗口（手机上新开的）交给系统安置：那块屏已经没了，放回原处只会落到屏幕外
         if let screen = gone { before.windows = before.windows.filter { !screen.contains(CGPoint(x: $0.value.midX, y: $0.value.midY)) } }
-        // 远程结束后撤屏（UU 已经还原），撤屏前的样子就是用户自己的设置：系统套用旧模式时也写进了永久配置，
+        // 远程结束后撤屏（向日葵 已经还原），撤屏前的样子就是用户自己的设置：系统套用旧模式时也写进了永久配置，
         // 只设回本次登录，磁盘上那组屏幕记的还是旧模式（实测），所以连永久配置一起写回。
         // 远程中撤屏，撤屏前可能是远程用的临时模式：只设回本次登录，远程结束后再写永久配置
         if remote { persistOwed = true }

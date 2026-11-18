@@ -1,10 +1,10 @@
 // 手机屏的身份与物理参数。尺寸和档位归屏幕适配（ScreenFit）。数值全部实测过（见记忆 project-phone-screen）。
-// 只有竖屏一种：原版 UU 本来就是横屏，Snug 补的是最适合手机的竖屏。
-// 横竖切换要换一块屏，UU 会丢掉选中的屏、跳回第一块，状态也跟着复杂，已经砍掉
+// 只有竖屏一种：原版 向日葵 本来就是横屏，Snug 补的是最适合手机的竖屏。
+// 横竖切换要换一块屏，向日葵 会丢掉选中的屏、跳回第一块，状态也跟着复杂，已经砍掉
 import Foundation
 
 public enum PhoneScreenSpec {
-    /// 在「显示器」设置和 UU远程 的屏幕列表里看到的名字
+    /// 在「显示器」设置和 向日葵 的屏幕列表里看到的名字
     public static let name = "Snug 手机屏"
     /// 'SN'：认出自己建的屏
     public static let vendorID: UInt32 = 0x534E

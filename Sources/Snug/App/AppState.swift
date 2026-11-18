@@ -20,7 +20,7 @@ final class AppState {
     var connection = ConnectionPhase.idle
     /// 此刻同时连着的控制端
     var controllers: [String] = []
-    /// UU 此刻在推的屏
+    /// 向日葵 此刻在推的屏
     var streamedDisplay: DisplayID?
     var phone = PhoneDesk.State()
     /// 手势翻译要开却没开起来（建事件监听失败）
@@ -44,7 +44,7 @@ final class AppState {
 
     init() {}
 
-    /// UU 正在推手机屏，也就是用户此刻正在手机屏上
+    /// 向日葵 正在推手机屏，也就是用户此刻正在手机屏上
     var phoneInUse: Bool {
         guard let display = phone.display else { return false }
         return streamedDisplay == display

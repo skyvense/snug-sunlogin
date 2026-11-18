@@ -4,7 +4,7 @@ import Foundation
 public struct AppConfig: Codable, Equatable, Sendable {
     /// 总开关：用手机远程时加一块手机屏
     public var phoneScreen = true
-    /// 手机屏上把 UU 发来的单指操作翻译成 iPhone 的手势
+    /// 手机屏上把 向日葵 发来的单指操作翻译成 iPhone 的手势
     public var gestures = true
     /// 手机屏底部小横条左边放相机键：截当前窗口到剪贴板。要另授「录屏与系统录音」权限，默认关
     public var screenshot = false
@@ -14,7 +14,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var phone = PhoneChoice.standard
     /// 是否已看过首次启动的欢迎页
     public var welcomed = false
-    /// 从哪检查和下载更新。UU远程 的用户基本在国内，默认腾讯云
+    /// 从哪检查和下载更新。向日葵 的用户基本在国内，默认腾讯云
     public var updateSource = UpdateSource.tencent
     /// 上次运行的版本：和这次不一样说明刚换了版本，启动时弹「关于 Snug」
     public var lastVersion: Version?

@@ -4,10 +4,10 @@ import Testing
 
 /// 时间都写成「距 t0 的秒数」，断言里的数字能直接对上 1.5s 防抖、5s 静默期
 
-private let none = UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: false)
-private let overlay = UUSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil)
-private func capture(_ on: Bool?, _ table: ControllerTable = .unreadable) -> UUSignals {
-    UUSignals(overlayVisible: false, controllers: table, captureActive: on)
+private let none = SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: false)
+private let overlay = SunloginSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil)
+private func capture(_ on: Bool?, _ table: ControllerTable = .unreadable) -> SunloginSignals {
+    SunloginSignals(overlayVisible: false, controllers: table, captureActive: on)
 }
 
 @Suite("连接判定 ConnectionTracker")
@@ -115,11 +115,11 @@ struct ConnectionTrackerTests {
     func controllerChanges() {
         var t = ConnectionTracker()
         #expect(t.update(overlay, now: at(0)) == .connected(controllers: []))
-        #expect(t.update(UUSignals(overlayVisible: true, controllers: .shown(["iPad"]), captureActive: nil), now: at(0.5)) == .controllersChanged(["iPad"]))
-        #expect(t.update(UUSignals(overlayVisible: true, controllers: .shown(["iPad"]), captureActive: nil), now: at(1.0)) == nil)
-        #expect(t.update(UUSignals(overlayVisible: true, controllers: .shown(["iPhone"]), captureActive: nil), now: at(1.5)) == .controllersChanged(["iPhone"]))
-        #expect(t.update(UUSignals(overlayVisible: true, controllers: .unrecognized, captureActive: nil), now: at(2.0)) == nil)
-        #expect(t.update(UUSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil), now: at(2.5)) == nil)
+        #expect(t.update(SunloginSignals(overlayVisible: true, controllers: .shown(["iPad"]), captureActive: nil), now: at(0.5)) == .controllersChanged(["iPad"]))
+        #expect(t.update(SunloginSignals(overlayVisible: true, controllers: .shown(["iPad"]), captureActive: nil), now: at(1.0)) == nil)
+        #expect(t.update(SunloginSignals(overlayVisible: true, controllers: .shown(["iPhone"]), captureActive: nil), now: at(1.5)) == .controllersChanged(["iPhone"]))
+        #expect(t.update(SunloginSignals(overlayVisible: true, controllers: .unrecognized, captureActive: nil), now: at(2.0)) == nil)
+        #expect(t.update(SunloginSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil), now: at(2.5)) == nil)
         #expect(t.controllers == ["iPhone"])
     }
 
@@ -136,19 +136,19 @@ struct ConnectionTrackerTests {
 
     @Test("信号快照写进日志用的描述：区分读不到 / 未识别 / 具体名字")
     func snapshotDescription() {
-        #expect(UUSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil).description == "overlay=是 控制端=读不到 capture=未知")
-        #expect(UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: false).description == "overlay=否 控制端=未识别 capture=否")
-        #expect(UUSignals(overlayVisible: false, controllers: .shown(["iPhone", "iPad"]), captureActive: true).description == "overlay=否 控制端=iPhone,iPad capture=是")
+        #expect(SunloginSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil).description == "overlay=是 控制端=读不到 capture=未知")
+        #expect(SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: false).description == "overlay=否 控制端=未识别 capture=否")
+        #expect(SunloginSignals(overlayVisible: false, controllers: .shown(["iPhone", "iPad"]), captureActive: true).description == "overlay=否 控制端=iPhone,iPad capture=是")
     }
 
     @Test("在场只认正面证据：覆盖窗口、认出控制端、推流进行中，任一路就算；读不到、没认出都不算")
     func presenceNeedsPositiveEvidence() {
-        #expect(UUSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil).isPresent)
-        #expect(UUSignals(overlayVisible: false, controllers: .shown(["iPhone"]), captureActive: nil).isPresent)
-        #expect(UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: true).isPresent)
+        #expect(SunloginSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil).isPresent)
+        #expect(SunloginSignals(overlayVisible: false, controllers: .shown(["iPhone"]), captureActive: nil).isPresent)
+        #expect(SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: true).isPresent)
         for table in [ControllerTable.unreadable, .unrecognized] {
             for captureActive in [nil, false] as [Bool?] {
-                #expect(!UUSignals(overlayVisible: false, controllers: table, captureActive: captureActive).isPresent)
+                #expect(!SunloginSignals(overlayVisible: false, controllers: table, captureActive: captureActive).isPresent)
             }
         }
     }

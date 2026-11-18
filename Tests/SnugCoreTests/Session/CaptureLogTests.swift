@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import SnugCore
 
-/// 夹具来自 2026-11-12 本机 `log show --style ndjson --predicate 'process == "UURemoteServer" …'`，
+/// 夹具来自 2026-11-12 本机 `log show --style ndjson --predicate 'process == "AweSun" …'`，
 /// 只保留时间、类型、子系统、进程路径和消息正文，不含 IP、用户名、主目录路径
 private func fixture(_ name: String) throws -> [String] {
     guard let url = Bundle.module.url(forResource: "uuremoteserver-\(name)", withExtension: "ndjson", subdirectory: "Fixtures") else {
@@ -37,7 +37,7 @@ private func activity(_ name: String, at probes: [String]) throws -> [String: Bo
     return result
 }
 
-private func message(_ text: String, process: String = "/Applications/UURemote.app/Contents/Helpers/UURemoteServer",
+private func message(_ text: String, process: String = "/Applications/Sunlogin.app/Contents/Helpers/AweSun",
                      at time: String = "19:01:43.417100", processID: Int? = nil) -> String {
     var obj: [String: Any] = ["timestamp": "2026-11-12 \(time)-0800", "processImagePath": process, "eventMessage": text]
     obj["processID"] = processID
@@ -53,7 +53,7 @@ private let stopCapture = " [INFO] -[SCStream stopCaptureWithCompletionHandler:]
 
 @Suite("推流日志 CaptureLogParser / CaptureSessionState")
 struct CaptureLogTests {
-    @Test("逐类识别 UURemoteServer 的行")
+    @Test("逐类识别 AweSun 的行")
     func classify() {
         let p = CaptureLogParser()
         #expect(p.parse(line: message(" [INFO] -[SCStream startCaptureWithCompletionHandler:]:939 0x1 streamID=<private>"))?.event == .captureStarted)
@@ -70,7 +70,7 @@ struct CaptureLogTests {
         let p = CaptureLogParser()
         #expect(p.parse(line: message(" [ERROR] -[SCStream stopCaptureWithCompletionHandler:]_block_invoke_2:995 error=Error Domain=x Code=-3808")) == nil)
         #expect(p.parse(line: message(" [INFO] -[SCStream startCaptureWithCompletionHandler:]:939 0x1", process: "/usr/libexec/other")) == nil)
-        #expect(p.parse(line: "Filtering the log data using \"process == UURemoteServer\"") == nil)
+        #expect(p.parse(line: "Filtering the log data using \"process == AweSun\"") == nil)
         #expect(p.parse(line: #"{"count":28,"finished":1}"#) == nil)
         #expect(p.parse(line: message("CGSDisplayNotifyProc: got notification kCGSDisplayWillReconfigure")) == nil)
     }
@@ -126,7 +126,7 @@ struct CaptureLogTests {
         #expect(p.parse(line: message(" [INFO] -[SCDisplay initWithDict:]:196 (0x1) frame=(0,0,1,1)")) == nil)
     }
 
-    @Test("UU 在推哪块屏：推流开始前最后描述的那块；中途枚举别的屏不改；停流过了宽限就清空")
+    @Test("向日葵 在推哪块屏：推流开始前最后描述的那块；中途枚举别的屏不改；停流过了宽限就清空")
     func streamingDisplay() {
         // 形态取自 2026-11-12 20:00:41–44 与 20:01:03 的真实日志：先枚举 1、14，再为 1 建过滤器并开推；
         // 关屏后停流，枚举 14、为 14 建过滤器并开推；20:01:03.772 停流
@@ -214,7 +214,7 @@ struct CaptureLogTests {
         #expect(CaptureSessionState.resumed(history: [], live: Array(live.prefix(1)), server: 100).isActive(at: d.addingTimeInterval(700)) == false)
     }
 
-    @Test("回放只认此刻的 UURemoteServer 进程：上一个进程崩溃前开的推流不算；服务端没在运行、读不到进程号的都不认")
+    @Test("回放只认此刻的 AweSun 进程：上一个进程崩溃前开的推流不算；服务端没在运行、读不到进程号的都不认")
     func resumedIgnoresOtherProcesses() {
         let d = ts("22:00:00.000")
         // 进程 100 开推后崩溃，没留下停流的日志；现在的服务端是 200
@@ -263,6 +263,6 @@ struct CaptureLogTests {
             #expect(CaptureLogParser.classify(text) != nil)
             #expect(CaptureLogParser.keywords.contains { text.contains($0) })
         }
-        #expect(CaptureLogParser.predicate.hasPrefix("process == \"UURemoteServer\" AND ("))
+        #expect(CaptureLogParser.predicate.hasPrefix("process == \"AweSun\" AND ("))
     }
 }

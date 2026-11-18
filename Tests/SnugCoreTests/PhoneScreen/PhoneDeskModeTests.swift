@@ -82,7 +82,7 @@ struct PhoneDeskModeTests {
         await rig.desk.idle()
         #expect(!rig.journal.all.contains { $0.hasSuffix("永久") })
 
-        // 远程结束，UU 把主屏还原成 60Hz（只对本次登录）；屏还睡着时等着
+        // 远程结束，向日葵 把主屏还原成 60Hz（只对本次登录）；屏还睡着时等着
         rig.journal.clear()
         rig.displays.others[1] = redmi60
         rig.displays.asleep = [1, 3]

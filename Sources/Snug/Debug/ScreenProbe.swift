@@ -1,6 +1,6 @@
 // --probe-screens：按规格建实验屏，打印系统给它们列出的模式，屏上铺校准图，按 Ctrl-C 撤掉（实测见 docs/multi-screen.md 第 7 节）。
-// 校准图：四边每 10 点一条线、每 50 点一条黄线，数字是离那条边多远（点）。在手机、平板、电脑上截 UU远程 的画面，
-// 看每条边最先露出的是哪条线，就知道 UU 压住了多少。九个靶心用来测点得准不准：点下去标出落点，同时打印到终端。
+// 校准图：四边每 10 点一条线、每 50 点一条黄线，数字是离那条边多远（点）。在手机、平板、电脑上截 向日葵 的画面，
+// 看每条边最先露出的是哪条线，就知道 向日葵 压住了多少。九个靶心用来测点得准不准：点下去标出落点，同时打印到终端。
 // 切模式照正式版的做法交给帮手子进程（Snug --set-mode）：亲自切过模式的进程，虚拟屏释放后要拖很久才下线。
 // main=on 的那块建好后设成主屏（V11），撤之前先按记下的排布摆回去，再释放
 import AppKit
@@ -124,7 +124,7 @@ final class ScreenProbe: NSObject, NSApplicationDelegate {
         for probe in probes { placePattern(probe.id) }
     }
 
-    /// 屏幕一变（UU 改模式、加撤屏），系统会连着回调好几次：停 0.5 秒再打印一次此刻的样子
+    /// 屏幕一变（向日葵 改模式、加撤屏），系统会连着回调好几次：停 0.5 秒再打印一次此刻的样子
     private func displaysChanged() {
         guard !shuttingDown else { return }
         pendingReport?.cancel()

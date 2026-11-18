@@ -1,4 +1,4 @@
-// 手势翻译的系统部分：一个事件监听，只接管 UURemoteServer 发来、在范围里按下的鼠标左键，
+// 手势翻译的系统部分：一个事件监听，只接管 AweSun 发来、在范围里按下的鼠标左键，
 // 交给 TouchTranslator 判断，再照它说的补发点击、右键或滚动（事件怎么读、怎么拼见 TouchEvents）。本机的触控板、鼠标一律不碰。
 // 跑在独立线程上：主线程会被建屏、搬窗口卡住，监听回调一慢，系统会让全机的鼠标跟着卡
 import CoreGraphics
@@ -39,7 +39,7 @@ public final class TouchTap {
             return false
         }
         session = next
-        Log.info("手势翻译已开启（只接管 \(UURemote.serverProcess) 发来、在手机屏里的操作）")
+        Log.info("手势翻译已开启（只接管 \(Sunlogin.serverProcess) 发来、在手机屏里的操作）")
         return true
     }
 
@@ -63,7 +63,7 @@ private final class TapSession: @unchecked Sendable {
     private var translator = TouchTranslator()
     private var heldPress: CGEvent?
     private var coastTimer: CFRunLoopTimer?
-    private var uu = UUEventSource()
+    private var uu = SunloginEventSource()
 
     init(region: OSAllocatedUnfairLock<TouchRegion?>, closeWindow: @escaping @Sendable (UInt32) -> Void) {
         self.region = region
@@ -78,7 +78,7 @@ private final class TapSession: @unchecked Sendable {
             ready.signal()
             if ok { CFRunLoopRun() }
         }
-        thread.name = "com.zephyr4123.snug.touch"
+        thread.name = "io.github.skyvense.snugsunlogin.touch"
         thread.qualityOfService = .userInteractive
         thread.start()
         // 建监听是同步的、很快，不设超时：设了超时反而会在超时后留下一个关不掉的监听。

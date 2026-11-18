@@ -1,4 +1,4 @@
-// AppController：把 UU 的观测、会话层和手机屏接在一起。
+// AppController：把 向日葵 的观测、会话层和手机屏接在一起。
 // 每 0.5 秒一拍：感知器给出观测 → 会话层判断连没连、是不是同一次远程 → 算出「要不要手机屏」交给 PhoneDesk。
 // 手机屏在时开手势翻译，范围跟着手机屏走。全仓唯一写配置的地方；界面只读 state，意图见 AppController+Intents
 import AppKit
@@ -26,7 +26,7 @@ final class AppController: Sendable {
     let store: ConfigStore
     /// --preview-phone：不等手机连上就要手机屏
     private let previewPhone: Bool
-    private let sensor = UUSensor()
+    private let sensor = SunloginSensor()
     private var session = RemoteSession()
     private let touch = TouchTap()
     private var watcher: DisplayWatcher?

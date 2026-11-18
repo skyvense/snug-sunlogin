@@ -1,10 +1,10 @@
 // 屏幕适配：手机屏的比例跟着用户的手机走，宽度跟着屏上的窗口走。
-// 比例：UU 把画面等比缩放、居中铺在手机上，底部工具栏压在画面上。手机屏的高宽比 = 手机屏幕的高宽比扣掉上下各 uuInset，
+// 比例：向日葵 把画面等比缩放、居中铺在手机上，底部工具栏压在画面上。手机屏的高宽比 = 手机屏幕的高宽比扣掉上下各 sunloginInset，
 // 画面正好落在工具栏和灵动岛之间（17 Pro Max 上是 540×950）。手机屏幕从哪来见 PhoneModels。
 // 宽度：平时用基准宽度，越窄字越大，最窄到 2 倍高清的门槛（宽 540、高 800，实测）。App 限定了最小尺寸、基准宽度铺不满时，
 // 手机屏换成刚好装得下它的一档，窗口照样铺满，整屏等比缩小（字跟着小，手机上可以双指放大）。
 // 不按 App 预设：放窗口时先按基准宽度铺，App 卡在自己的最小尺寸上，读回来的大小就是它要的，据此选档。
-// 档位建屏时一次登记好，宽高比都一样：换档时 UU 不用重新推流、点击位置照样准，画面平滑缩放；
+// 档位建屏时一次登记好，宽高比都一样：换档时 向日葵 不用重新推流、点击位置照样准，画面平滑缩放；
 // 换档只是选一档（帮手进程切，约 0.4 秒，屏不掉线、编号不变）。实测见记忆 project-phone-screen
 import CoreGraphics
 
@@ -14,7 +14,7 @@ public struct ScreenFit: Equatable, Sendable, CustomStringConvertible {
     /// 2 倍高清的门槛（实测，和像素上限无关）：宽不小于 540、高不小于 800 点，系统才把 2 倍模式标成桌面可用
     public static let minWidth = 540
     public static let minHeight = 800
-    /// 最宽一档：字只剩一半，不比 UU 原版看主屏大了，再宽没有意义。更宽的 App 用这一档、靠左放
+    /// 最宽一档：字只剩一半，不比 向日葵 原版看主屏大了，再宽没有意义。更宽的 App 用这一档、靠左放
     public static let maxWidth = 1080
     /// 相邻两档差 10 点：装下窗口后最多多缩 2%
     public static let step = 10
@@ -22,9 +22,9 @@ public struct ScreenFit: Equatable, Sendable, CustomStringConvertible {
     public static let ratioRange: ClosedRange<Double> = 1...2
     /// 像素上限：最宽一档按最长比例的 2 倍，所有比例共用。换比例时屏幕身份不变、不多出 ICC 文件（实测）
     public static let maxPixels = CGSize(width: maxWidth * 2, height: Int(Double(maxWidth) * ratioRange.upperBound) * 2)
-    /// 画面上下各让出的高度（点）。UU 底部工具栏 17 Pro Max 实测约 268 像素（89 点）；取 91 让 17 Pro Max 正好是
+    /// 画面上下各让出的高度（点）。向日葵 底部工具栏 17 Pro Max 实测约 268 像素（89 点）；取 91 让 17 Pro Max 正好是
     /// 真机上调好的 540×950（取 89 是 540×955），多出的 2 点当余量
-    static let uuInset: Double = 91
+    static let sunloginInset: Double = 91
     /// 不知道逻辑宽度时（安卓、自己填的）按这个估：安卓手机默认显示大小下常见 360–412dp
     static let assumedPoints: Double = 400
     /// 基准宽度下底部小横条的高度（点）
@@ -43,7 +43,7 @@ public struct ScreenFit: Equatable, Sendable, CustomStringConvertible {
     /// 按用户的手机算比例
     public init(phone: PhoneScreen) {
         let points = phone.points.map(Double.init) ?? Self.assumedPoints
-        self.init(ratio: Double(phone.height) / Double(phone.width) - 2 * Self.uuInset / points)
+        self.init(ratio: Double(phone.height) / Double(phone.width) - 2 * Self.sunloginInset / points)
     }
 
     init(ratio: Double) {

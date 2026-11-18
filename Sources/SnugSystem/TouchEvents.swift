@@ -1,6 +1,6 @@
 // 手势翻译和 CGEvent 之间的读写：接管哪几种事件、事件类型对应 TouchInput 的哪一种、拼要补发的事件、打上记号发出去；
-// UUEventSource 认哪些事件是 UURemoteServer 注入的。监听线程、状态机和按 TouchCommand 分派在 TouchTap。
-// 补发的事件打上记号：拷贝出来的事件保留 UU 的进程号，不打记号会被自己再接管一次，来回打转
+// SunloginEventSource 认哪些事件是 AweSun 注入的。监听线程、状态机和按 TouchCommand 分派在 TouchTap。
+// 补发的事件打上记号：拷贝出来的事件保留 向日葵 的进程号，不打记号会被自己再接管一次，来回打转
 import CoreGraphics
 import Darwin
 import Foundation
@@ -10,7 +10,7 @@ enum TouchEvents {
     /// eventSourceUserData 里的记号（'SNUG'）
     private static let marker: Int64 = 0x534E_5547
 
-    /// 接管的事件：只有鼠标左键（UU 把手指的按下、拖动、抬起都当成左键发过来）
+    /// 接管的事件：只有鼠标左键（向日葵 把手指的按下、拖动、抬起都当成左键发过来）
     static let mask = [CGEventType.leftMouseDown, .leftMouseDragged, .leftMouseUp].reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
 
     static func kind(of type: CGEventType) -> TouchInput.Kind? {
@@ -57,8 +57,8 @@ enum TouchEvents {
     }
 }
 
-/// 认 UURemoteServer 注入的事件：按来源进程号查可执行文件名，按进程号缓存。本机的触控板、鼠标不是它发的，一律不认
-struct UUEventSource {
+/// 认 AweSun 注入的事件：按来源进程号查可执行文件名，按进程号缓存。本机的触控板、鼠标不是它发的，一律不认
+struct SunloginEventSource {
     private var known: [pid_t: Bool] = [:]
 
     mutating func sent(_ event: CGEvent) -> Bool {
@@ -68,7 +68,7 @@ struct UUEventSource {
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         let length = Int(proc_pidpath(pid, &buffer, UInt32(buffer.count)))
         let path = length > 0 ? String(decoding: buffer.prefix(length).map { UInt8(bitPattern: $0) }, as: UTF8.self) : ""
-        let match = (path as NSString).lastPathComponent == UURemote.serverProcess
+        let match = (path as NSString).lastPathComponent == Sunlogin.serverProcess
         known[pid] = match
         return match
     }

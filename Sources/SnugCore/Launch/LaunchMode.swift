@@ -17,8 +17,8 @@ public enum LaunchMode: Equatable, Sendable {
     case previewPhone
     /// 只把界面渲染成 PNG
     case render(RenderTarget, output: URL)
-    /// 打印从 UU远程 读到的控制端与屏幕
-    case dumpUU
+    /// 打印从 向日葵 读到的控制端与屏幕
+    case dumpSunlogin
     /// 帮手模式：把一块屏切到 target 后立即退出（手机屏换档，或把加屏、撤屏时被 macOS 拨动的屏设回去）。
     /// 目标由主程序算好传来，帮手不读配置。主程序亲自切模式，手机屏释放时会拖 40 秒以上才下线；交给短命的子进程切就没有这个问题
     case setMode(display: DisplayID, to: ModeTarget)
@@ -30,7 +30,7 @@ public enum LaunchMode: Equatable, Sendable {
       （无参数）                      正常启动
       --preview-phone                 正常启动，不等手机连上就加手机屏（开发自测用）
       --render-<界面> <目录>           把界面渲染成 PNG（界面：\(RenderTarget.allCases.map(\.rawValue).joined(separator: " / "))）
-      --dump-uu                       打印从 UU远程 读到的表格行、控制端与屏幕
+      --dump-sunlogin                       打印从 向日葵 读到的表格行、控制端与屏幕
       --probe-screens <规格> [<规格> …]  实测用：建实验屏、打印模式，按 Ctrl-C 撤掉。规格写成
                                       modes=1180x820+1000x695[,name=名字][,serial=999000001][,cap=像素宽x像素高][,pattern=off][,main=on]
       --set-mode <屏幕编号> <宽> <高>   把手机屏换到这一档（点，2 倍）（主程序内部用）
@@ -72,8 +72,8 @@ public enum LaunchMode: Equatable, Sendable {
         switch flag {
         case "--preview-phone":
             return .previewPhone
-        case "--dump-uu":
-            return .dumpUU
+        case "--dump-sunlogin":
+            return .dumpSunlogin
         case "--probe-screens":
             var specs: [String] = []
             while let spec = rest.first, !spec.hasPrefix("--") {

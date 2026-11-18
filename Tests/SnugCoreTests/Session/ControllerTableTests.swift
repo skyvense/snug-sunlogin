@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import SnugCore
 
-/// 行文字是照 UU 的界面构造的样本（大部分取自 PR #2，作者 Feng GAO）；「远程控制 / 远程协助 / 副屏模式」取自 UU 4.46.0 的界面文案；
-/// 界面树照 UU 4.46.0 实测的结构构造
+/// 行文字是照 向日葵 的界面构造的样本（大部分取自 PR #2，作者 Feng GAO）；「远程控制 / 远程协助 / 副屏模式」取自 向日葵 4.46.0 的界面文案；
+/// 界面树照 向日葵 4.46.0 实测的结构构造
 @Suite("控制端表格 ControllerTable")
 struct ControllerTableTests {
     @Test("没认出控制端行就是未识别，不是没人：没有行、首页或错误页的行、远程协助或副屏的行、有标记没名字", arguments: [
@@ -26,23 +26,23 @@ struct ControllerTableTests {
         ]) == .shown(["iPhone", "iPad"]))
     }
 
-    // 照 UU 4.46.0 实测的界面树（11-16，手机连本机时读的）：本机被控页叠在窗口最上层，标题和控制端表格直接挂在窗口下；
+    // 照 向日葵 4.46.0 实测的界面树（11-16，手机连本机时读的）：本机被控页叠在窗口最上层，标题和控制端表格直接挂在窗口下；
     // 左边栏顶上另有一张「本机被控中」小卡片，本机被控时一直在，旁边没有表格
-    private static func text(_ s: String) -> UUElement { UUElement(.text(s)) }
-    private static func row(_ texts: String...) -> UUElement {
-        UUElement(.row, [UUElement(.other, [UUElement(.other)] + texts.map(text) + [UUElement(.other)])])
+    private static func text(_ s: String) -> AXTreeElement { AXTreeElement(.text(s)) }
+    private static func row(_ texts: String...) -> AXTreeElement {
+        AXTreeElement(.row, [AXTreeElement(.other, [AXTreeElement(.other)] + texts.map(text) + [AXTreeElement(.other)])])
     }
-    private static func table(_ rows: UUElement...) -> UUElement { UUElement(.table, rows + [UUElement(.other)]) }
-    private static let sidebarCard = UUElement(.other, [UUElement(.other), text("本机被控中"), text("当前有 1 台设备正在控制此电脑"), text("我的设备"), text("全部设备")])
-    private static func localPage(_ rows: UUElement...) -> [UUElement] {
-        [UUElement(.other), text("本机被控中"), text("00:00:04"), text("当前有 \(rows.count) 台设备正在控制此电脑"), UUElement(.other), text("本账号设备"), UUElement(.table, rows)]
+    private static func table(_ rows: AXTreeElement...) -> AXTreeElement { AXTreeElement(.table, rows + [AXTreeElement(.other)]) }
+    private static let sidebarCard = AXTreeElement(.other, [AXTreeElement(.other), text("本机被控中"), text("当前有 1 台设备正在控制此电脑"), text("我的设备"), text("全部设备")])
+    private static func localPage(_ rows: AXTreeElement...) -> [AXTreeElement] {
+        [AXTreeElement(.other), text("本机被控中"), text("00:00:04"), text("当前有 \(rows.count) 台设备正在控制此电脑"), AXTreeElement(.other), text("本账号设备"), AXTreeElement(.table, rows)]
     }
     /// 设备详情页：点开同账号的另一台设备时右边显示的页面，那台设备被控时也列出控制端，行的样子和本机被控页一样（issue #12）
-    private static func otherDevicePage(_ rows: UUElement...) -> UUElement {
-        UUElement(.other, [text("MacBook Pro"), text("被控中"), text("当前有 \(rows.count) 台设备正在控制此电脑"), text("本账号设备"), UUElement(.table, rows)])
+    private static func otherDevicePage(_ rows: AXTreeElement...) -> AXTreeElement {
+        AXTreeElement(.other, [text("MacBook Pro"), text("被控中"), text("当前有 \(rows.count) 台设备正在控制此电脑"), text("本账号设备"), AXTreeElement(.table, rows)])
     }
-    private static func window(sidebar: [UUElement], main: [UUElement], overlay: [UUElement] = []) -> UUElement {
-        UUElement(.other, [UUElement(.other, [UUElement(.other, sidebar), UUElement(.other, main)])] + overlay + [UUElement(.other, [text("全部设备")])])
+    private static func window(sidebar: [AXTreeElement], main: [AXTreeElement], overlay: [AXTreeElement] = []) -> AXTreeElement {
+        AXTreeElement(.other, [AXTreeElement(.other, [AXTreeElement(.other, sidebar), AXTreeElement(.other, main)])] + overlay + [AXTreeElement(.other, [text("全部设备")])])
     }
 
     @Test("本机被控：只认和「本机被控中」标题平级的那张表（实测的界面树）")
@@ -52,7 +52,7 @@ struct ControllerTableTests {
         #expect(ControllerTable(windows: [tree]) == .shown(["iPhone"]))
     }
 
-    @Test("同账号的另一台 Mac 被手机连着、本机没人连：UU 停在那台的设备详情页，表里的控制端不是本机的（issue #12）")
+    @Test("同账号的另一台 Mac 被手机连着、本机没人连：向日葵 停在那台的设备详情页，表里的控制端不是本机的（issue #12）")
     func otherDeviceIsNotLocal() {
         let tree = Self.window(sidebar: [Self.text("我的设备"), Self.text("全部设备")],
                                main: [Self.otherDevicePage(Self.row("iPhone Air", "远程控制", "连接时长 00:01:10"))])

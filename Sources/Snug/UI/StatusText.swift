@@ -98,7 +98,7 @@ extension PhoneDesk.Notice {
         case .noNewWindow(let app): StatusText(headline: "\(app) 无法新建窗口", detail: "可点 App 打开已有窗口")
         case .noWindow(let app): StatusText(headline: "未找到 \(app) 的窗口", detail: "App 已打开，但没有可显示的窗口")
         case .quitStalled(let app, _): StatusText(headline: "\(app) 未退出", detail: "强制退出将丢失未存储的内容")
-        case .reshaped: StatusText(headline: "屏幕比例已调整", detail: "在 UU远程 中切到其他屏幕再切回，点按位置才准确")
+        case .reshaped: StatusText(headline: "屏幕比例已调整", detail: "在 向日葵 中切到其他屏幕再切回，点按位置才准确")
         case .reshapeFailed: StatusText(headline: "屏幕比例未能调整", detail: "下次连接时生效")
         case .zoomLeftBehind(let app, let steps): StatusText(headline: "\(app) 窗口已关闭", detail: "再打开时字号若偏大，按 \(steps) 次 ⌘- 复原")
         }

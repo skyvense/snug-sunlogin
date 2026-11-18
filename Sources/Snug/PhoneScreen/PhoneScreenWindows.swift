@@ -66,7 +66,7 @@ final class PhoneScreenWindows {
         homeBarView?.showsCamera = state.config.screenshot
 
         let showList = phone.listVisible || phone.placed == nil
-        // 手机在看这块屏。不知道 UU 在推哪块屏（推流日志没读到）时当作在看
+        // 手机在看这块屏。不知道 向日葵 在推哪块屏（推流日志没读到）时当作在看
         let watching = state.streamedDisplay == nil || state.phoneInUse
         if showList { list.orderFrontRegardless() } else { list.orderOut(nil) }
         // 手机离开了就关掉搜索、手机型号页，交还键盘：不然在主屏上打的字会进到看不见的输入框

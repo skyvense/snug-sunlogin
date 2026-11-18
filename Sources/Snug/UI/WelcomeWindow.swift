@@ -20,7 +20,7 @@ struct WelcomeView: View {
                 Text("手机远程 Mac 的显示与触控增强").foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 20) {
-                Feature(symbol: "iphone.gen3", title: "选择「\(PhoneScreenSpec.name)」", detail: "UU远程 屏幕列表中切换；不切换则一切如常")
+                Feature(symbol: "iphone.gen3", title: "选择「\(PhoneScreenSpec.name)」", detail: "向日葵 屏幕列表中切换；不切换则一切如常")
                 Feature(symbol: "hand.point.up.left.fill", title: "点选 App 或窗口", detail: "铺满手机屏，字号自动放大")
                 Feature(symbol: "hand.draw.fill", title: "触控手势", detail: "单指滚动 · 长按选择 · 长按松开右键")
             }
