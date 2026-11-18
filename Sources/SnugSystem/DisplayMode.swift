@@ -3,7 +3,6 @@
 // 交给短命的帮手进程（Snug --set-mode / --restore-mode）切完就退出，释放照样 0.1 秒下线
 import CGVirtualDisplayBridge
 import CoreGraphics
-import Foundation
 import SnugCore
 
 public enum DisplayMode {
@@ -95,21 +94,16 @@ public enum DisplayMode {
 
     /// 帮手进程里调用：把屏的旋转设到 degrees（度，只认 0/90/180/270）。和 apply 分开调：
     /// 设回时先设模式、再设旋转（模式一换，旋转可能跟着被拨回 0°）。
-    /// 没有公开 API 能设旋转（`CGConfigureDisplayRotation` 不存在）：走私有框架 MonitorPanel 的
-    /// MPDisplay（displayplacer 同款做法），它按系统设置里改旋转的同一条路下发，所以 session 与
-    /// permanent 两种范围效果相同（都落到系统配置），permanently 只为与模式恢复共用一套参数而留。
-    /// 旋转不是瞬时生效：下发后轮询 CGDisplayRotation，最多等 10 秒；类不在或超时都如实返回失败，
-    /// 调用方只记日志、不卡撤屏
+    /// 没有公开 API 能设旋转（`CGConfigureDisplayRotation` 不存在）：桥接层的 SnugSetDisplayRotation
+    /// 运行时加载私有框架 MonitorPanel、按类名找 MPDisplay 下发（displayplacer 同款做法），
+    /// 它按系统设置里改旋转的同一条路走，所以 session 与 permanent 两种范围效果相同（都落到系统配置），
+    /// permanently 只为与模式恢复共用一套参数而留。类不在或超时都如实返回失败，调用方只记日志、不卡撤屏
     public static func applyRotation(_ degrees: Double, to id: DisplayID, permanently: Bool) -> Outcome {
-        if NSClassFromString("MPDisplay") == nil {
-            Bundle(path: "/System/Library/PrivateFrameworks/MonitorPanel.framework")?.load()
+        switch SnugSetDisplayRotation(id, Int(degrees)) {
+        case 0: return .switched
+        case 1: return .unavailable
+        default: return .failed(.failure)
         }
-        guard let display = MPDisplay(displayID: id) else { return .unavailable }
-        display.setOrientation(NSInteger(degrees))
-        for _ in 0 ..< 100 where CGDisplayRotation(id) != degrees {
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        return CGDisplayRotation(id) == degrees ? .switched : .failed(.failure)
     }
 }
 

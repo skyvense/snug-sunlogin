@@ -43,10 +43,15 @@ NS_ASSUME_NONNULL_BEGIN
 //  MPDisplay 私有 API 声明（MonitorPanel 私有框架）：设置显示器旋转——公开 API 只有读（CGDisplayRotation），没有写
 //  来源：displayplacer (MIT) https://github.com/jakehilborn/displayplacer 的 src/MonitorPanel.m 同款用法：
 //  initWithDisplayID 拿到这块屏，setOrientation 传角度（0/90/180/270），生效要轮询 CGDisplayRotation 等
-//  框架不在链接期引入：运行时先 NSClassFromString 找类，找不到再按路径加载；类不在就当这条机制不可用
+//  这个类只能运行时按名字找（SnugSetDisplayRotation 里做）：Swift/ObjC 里直接引用类符号会让链接器
+//  去找 _OBJC_CLASS_$_MPDisplay，而 MonitorPanel 不在链接集合里，会报 Undefined symbols
 @interface MPDisplay : NSObject
 - (nullable instancetype)initWithDisplayID:(CGDirectDisplayID)displayID;
 - (void)setOrientation:(NSInteger)orientation;
 @end
+
+//  设置显示器旋转：运行时加载 MonitorPanel、按类名拿到 MPDisplay 再下发，下发后轮询等生效（最多 10 秒）
+//  返回 0 成功、1 机制不可用（类不在或对象建不出来）、2 已下发但超时未生效
+NSInteger SnugSetDisplayRotation(CGDirectDisplayID displayID, NSInteger degrees);
 
 NS_ASSUME_NONNULL_END
