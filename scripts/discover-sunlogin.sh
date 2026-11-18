@@ -49,6 +49,10 @@ else
 fi
 
 echo
+echo
+echo "--- 1b. 显示器清单（分辨率 / 旋转 / 主屏）---"
+system_profiler SPDisplaysDataType 2>/dev/null | sed 's/^/  /'
+
 echo "--- 2. 向日葵相关进程与后台项 ---"
 echo "进程（pgrep awesun|sunlogin|oray）："
 pgrep -il 'awesun|sunlogin|oray' 2>/dev/null | sed 's/^/  /' || echo "  （无）"
