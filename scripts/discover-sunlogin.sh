@@ -13,7 +13,8 @@
 #
 # 全程只读，不改任何设置。输出写到 ~/Desktop/snug-sunlogin-discovery-<时间>/report.txt，
 # 把整个文件夹发回给开发方即可。
-set -u
+# 被 sh/zsh 误启动时自己切回 bash（进程替换等语法只有 bash 支持）
+[ -z "${BASH_VERSION:-}" ] && exec bash "$0" "$@"
 
 MODE="${1:-baseline}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
