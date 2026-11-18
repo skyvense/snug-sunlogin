@@ -16,10 +16,10 @@ Snug 不接入远程软件的任何接口，只观察它在本机留下的三路
 
 | # | 耦合点 | UU远程（原版） | 向日葵版 | 状态 |
 | :- | :--- | :--- | :--- | :--- |
-| 1 | 身份常量 `Sunlogin.swift` | `com.netease.uuremote` / 进程 `UURemoteServer` | `com.oray.sunlogin.macclient` / 进程 `AweSun` | bundle id 已由公开资料核对（安装收据、Homebrew cask `awesun`）；**进程名是候选值，待实机核对** |
-| 2 | 推流判定 `CaptureLogParser` | 按进程名过滤系统日志里的 ScreenCaptureKit / VideoToolbox 事件 | 关键字不变，只换进程名（跟随 #1 常量） | 若向日葵不用 ScreenCaptureKit 推流，此路信号缺席，会话判定降级（见下） |
-| 3 | 手势接管 `SunloginEventSource` | 只接管来源进程名为 `UURemoteServer` 的注入事件 | 跟随 #1 常量 | 待实机核对注入进程名 |
-| 4 | 覆盖窗口 `SunloginApp.overlayVisible` | owner 为 `UURemoteServer` 的在屏窗口 | 跟随 #1 常量 | 向日葵被控时是否有覆盖窗口，待实机核对 |
+| 1 | 身份常量 `Sunlogin.swift` | `com.netease.uuremote` / 进程 `UURemoteServer` | `com.oray.sunlogin.macclient` / 推流进程 `AweSun_Desktop` | ✅ 已实机核对（2026-11-18）：推流日志全部来自 AweSun_Desktop（`Contents/Helpers/AweSun_Desktop.app`）；覆盖窗口是主程序 AweSun 放的，单独认 `overlayWindowOwner` |
+| 2 | 推流判定 `CaptureLogParser` | 按进程名过滤系统日志里的 ScreenCaptureKit / VideoToolbox 事件 | 关键字不变，只换进程名（跟随 #1 常量） | ✅ 已实机核对：向日葵确实走 ScreenCaptureKit，25 秒采样与 10 分钟回看都抓到了 AweSun_Desktop 的 `SCDisplay/SCStream` 事件 |
+| 3 | 手势接管 `SunloginEventSource` | 只接管来源进程名为 `UURemoteServer` 的注入事件 | 跟随 #1 常量（AweSun_Desktop） | 待实机核对：注入输入是否也由 AweSun_Desktop 发出（真机上试单指滑动是否被翻译即可判） |
+| 4 | 覆盖窗口 `SunloginApp.overlayVisible` | owner 为 `UURemoteServer` 的在屏窗口 | owner 为主程序 `AweSun` 且图层 ≥ 100 的在屏窗口（实测被控悬浮窗图层 1001） | ⚠️ 部分核对：被控时存在；未被控时是否也在屏待基线报告确认，在的话这一路会误报 |
 | 5 | 控制端表格 `ControllerTable` | 用辅助功能读 UU 主窗口「本机被控中」列表，区分手机/电脑控制端 | **未适配**：解析的仍是 UU 的界面结构，向日葵界面不同，预计读不到 | 读不到时按上游既有降级：未知控制端等 2 秒按手机处理。副作用：电脑连电脑的向日葵会话也会升起手机屏（v0.1 可接受） |
 | 6 | 手机屏比例扣减 `ScreenFit.sunloginInset` | 上下各扣 91 点（UU 手机端工具栏实测） | 数值暂沿用 91 | **待校准**：向日葵手机端工具栏高度不同，按真机黑边/遮挡情况改这一个数 |
 | 7 | 「换比例后要在远程里重选屏幕」提示 | UU 只在选中屏幕时按当时尺寸起推 | 提示文案已改名为向日葵 | 向日葵若能跟随尺寸变化，此提示多余但无害；待实机确认 |
@@ -61,6 +61,25 @@ Snug 不接入远程软件的任何接口，只观察它在本机留下的三路
 - 向日葵的推流若走自研捕获而非 ScreenCaptureKit，第 2 路信号（推流日志）不存在：
   会话判定退化为覆盖窗口 + 进程在场两路，断开判定会变钝，`ConnectionTracker` 的注释里写了后果与对策。
 - 本分支与向日葵及其开发商贝锐无关，非官方软件。
+
+## 实机记录（2026-11-18，Mac mini M4 / macOS 26.6.2 / 向日葵 16.8.1）
+
+测试机显示器：一横一竖的异形双屏——DELL U2720QM 竖置（旋转 270°，逻辑 1440×2560@60）为**主屏**，
+G27M7Pro 横置（2560×1440@160，HDR）。发现报告确认：手机屏成功创建（1080×1900，540×950 点），
+位置被系统排在主屏左侧（坐标 -540,0），即两块物理屏之间；推流进程为 AweSun_Desktop（见 #1/#2）。
+
+试用反馈的四个现象与当前判断：
+
+1. **虚拟屏插在两块物理屏之间**：新建显示器的落位由 macOS 排列算法决定，Snug 不指定位置；
+   对窗口搬运无影响（走全局坐标），但观感与鼠标跨屏路径会变。是否要主动把手机屏排到最外侧，待定。
+2. **物理屏 HDR 状态被修改**：显示器集合变化时系统会重套模式；Snug 的模式记录/恢复只按
+   分辨率、缩放、刷新率匹配（见 `DisplayMode.swift` 的 `ModeInfo`），**模式身份里没有 HDR**，
+   同规格下可能选到非 HDR 的那一档。待取 `~/Library/Logs/SnugSunlogin.log` 里的模式记录证实后修。
+3. **主屏最左侧出现空白**：与 #2 同族嫌疑（主屏被套到错误缩放模式时画面偏移/留边），
+   也待日志里的主屏模式记录确认。
+4. **手机上画面偏大、不像 iPhone 17 Pro Max 的尺寸**：报告显示手机屏是默认的 540×950 点，
+   即尚未选择机型；iPhone 17 Pro Max 应为 440×956 点逻辑尺寸，需在设置或 App 资源库右上角
+   选一次机型。另外 #6 的 91 点扣减是按 UU 客户端量的，向日葵客户端的工具栏不同，选完机型后按实际黑边再校准。
 
 ## 许可证与致谢
 
