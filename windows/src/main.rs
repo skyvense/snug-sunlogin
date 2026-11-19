@@ -1,14 +1,17 @@
 //! Snug for Sunlogin — Windows 版 spike（Rust）
 //!
 //! 只验证一件事：向日葵手机端能不能用一块 Windows 虚拟屏（VDD），串流是否流畅。
-//! 本工具做三件小事：枚举显示器并把 VDD 虚拟屏设成手机屏模式（1080×2346@60）；
-//! 按需改 VDD 配置并重启驱动设备（可原样恢复）；在虚拟屏上开动/静对照的测试窗口。
+//! 本工具做四件小事：枚举显示器并把 VDD 虚拟屏设成手机屏模式（1080×2346@60）；
+//! 按需改 VDD 配置并重启驱动设备（可原样恢复）；在虚拟屏上开动/静对照的测试窗口；
+//! 在虚拟屏上开 App 资源库（启动器）：运行中/全部两页 + 搜索，选中 App 自动全屏到虚拟屏。
 //! 不做手势翻译（机主 2026-11-19 定）。
 
 #![windows_subsystem = "windows"]
 
+mod apps;
 mod devices;
 mod display;
+mod launcher;
 mod log;
 mod testwin;
 mod vdd;
@@ -27,6 +30,7 @@ const ID_CREATE: i32 = 1002;
 const ID_REMOVE: i32 = 1003;
 const ID_TEST: i32 = 1004;
 const ID_INSTALL: i32 = 1005;
+const ID_LAUNCHER: i32 = 1006;
 
 struct MainState {
     status: HWND,
@@ -149,8 +153,8 @@ fn mk_control(
     hwnd
 }
 
-/// 写一行日志：落盘 + 显示到界面的日志框。
-fn ui_log(msg: &str) {
+/// 写一行日志：落盘 + 显示到界面的日志框。（pub(crate)：启动器也要往这里写）
+pub(crate) fn ui_log(msg: &str) {
     let line = log::write(msg);
     let (edit, text) = MAIN.with(|c| {
         let mut cell = c.borrow_mut();
@@ -407,13 +411,9 @@ fn remove_phone_screen() {
     ui_log("移除完成（原始配置的完整备份仍在 vdd_settings.xml.snug-pristine.bak）");
 }
 
-fn toggle_test_window() {
-    if testwin::is_open() {
-        testwin::close();
-        ui_log("测试窗口已关闭");
-        return;
-    }
-    let target = MAIN.with(|c| {
+/// 挑目标屏：手机屏模式的虚拟屏 > 虚拟屏 > 主屏 > 第一块。
+fn pick_target_display() -> Option<DisplayInfo> {
+    MAIN.with(|c| {
         let cell = c.borrow();
         let s = cell.as_ref()?;
         let pick = |pred: &dyn Fn(&DisplayInfo) -> bool| s.displays.iter().find(|d| pred(d));
@@ -422,7 +422,16 @@ fn toggle_test_window() {
             .or_else(|| pick(&|d: &DisplayInfo| d.primary))
             .or_else(|| s.displays.first())
             .cloned()
-    });
+    })
+}
+
+fn toggle_test_window() {
+    if testwin::is_open() {
+        testwin::close();
+        ui_log("测试窗口已关闭");
+        return;
+    }
+    let target = pick_target_display();
     match target {
         Some(d) => {
             ui_log(&format!(
@@ -433,6 +442,27 @@ fn toggle_test_window() {
                 Ok(()) => ui_log("测试窗口已打开：默认动态模式，左上角按钮可切到静态对照"),
                 Err(e) => ui_log(&format!("打开测试窗口失败：{e}")),
             }
+        }
+        None => ui_log("没有可用的显示器，先点「刷新显示器」"),
+    }
+}
+
+fn toggle_launcher() {
+    match pick_target_display() {
+        Some(d) => {
+            let rect = windows::Win32::Foundation::RECT {
+                left: d.x,
+                top: d.y,
+                right: d.x + d.width as i32,
+                bottom: d.y + d.height as i32,
+            };
+            if !launcher::is_open() {
+                ui_log(&format!(
+                    "在 {} 上打开 App 资源库（{}×{}）",
+                    d.device_name, d.width, d.height
+                ));
+            }
+            launcher::toggle(rect);
         }
         None => ui_log("没有可用的显示器，先点「刷新显示器」"),
     }
@@ -485,9 +515,10 @@ unsafe extern "system" fn main_wnd_proc(
                 9002,
             );
             mk_control(hwnd, "Button", "刷新显示器", base, 14, 178, 110, 32, ID_REFRESH);
-            mk_control(hwnd, "Button", "创建手机屏", base, 132, 178, 150, 32, ID_CREATE);
-            mk_control(hwnd, "Button", "移除手机屏", base, 290, 178, 150, 32, ID_REMOVE);
-            mk_control(hwnd, "Button", "测试窗口", base, 448, 178, 150, 32, ID_TEST);
+            mk_control(hwnd, "Button", "创建手机屏", base, 132, 178, 140, 32, ID_CREATE);
+            mk_control(hwnd, "Button", "移除手机屏", base, 280, 178, 140, 32, ID_REMOVE);
+            mk_control(hwnd, "Button", "测试窗口", base, 428, 178, 100, 32, ID_TEST);
+            mk_control(hwnd, "Button", "启动器", base, 536, 178, 98, 32, ID_LAUNCHER);
             mk_control(hwnd, "Button", "安装 VDD", base, 14, 218, 150, 32, ID_INSTALL);
             mk_control(
                 hwnd,
@@ -533,6 +564,7 @@ unsafe extern "system" fn main_wnd_proc(
                 ID_CREATE => create_phone_screen(),
                 ID_REMOVE => remove_phone_screen(),
                 ID_TEST => toggle_test_window(),
+                ID_LAUNCHER => toggle_launcher(),
                 ID_INSTALL => install_vdd(),
                 _ => {}
             }
@@ -540,6 +572,7 @@ unsafe extern "system" fn main_wnd_proc(
         }
         WM_DESTROY => {
             testwin::close();
+            launcher::close_all();
             unsafe {
                 PostQuitMessage(0);
             }
