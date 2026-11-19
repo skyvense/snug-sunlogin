@@ -2,7 +2,7 @@ import CoreGraphics
 import Testing
 @testable import SnugCore
 
-/// 换了手机型号（16:9 的 iPhone 8）：向日葵全屏不扣工具栏，基准 540×960
+/// 换了手机型号（16:9 的 iPhone 8）：向日葵全屏不扣工具栏，基准 544×960（540 吸附到 8 的倍数）
 private let iPhone8 = ScreenFit(phone: PhoneScreen(width: 750, height: 1334, points: 375))
 
 @Suite("手机屏调度：换手机型号")
@@ -37,7 +37,7 @@ struct PhoneDeskFitTests {
         rig.desk.setFit(iPhone8)
         #expect(rig.desk.state.work == .reshaping)
         await rig.desk.idle()
-        #expect(rig.journal.all == ["reshape 101 540×960"])
+        #expect(rig.journal.all == ["reshape 101 544×960"])
         #expect(rig.desk.state.screen == .ready(101))
         #expect(rig.desk.state.work == nil)
         // 向日葵 要切走再切回来才按新尺寸推流：提示一句
@@ -54,7 +54,7 @@ struct PhoneDeskFitTests {
         rig.desk.setFit(iPhone8)
         await rig.desk.idle()
         let area = FakeDisplays.area(width: 540, fit: iPhone8)
-        #expect(rig.journal.all.first == "reshape 101 540×960")
+        #expect(rig.journal.all.first == "reshape 101 544×960")
         #expect(rig.windows.window(finder.key)?.frame == area)
         #expect(rig.desk.state.listVisible == false)
     }
