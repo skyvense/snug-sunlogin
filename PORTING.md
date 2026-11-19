@@ -110,6 +110,10 @@ G27M7Pro 横置（2560×1440@160，HDR）。发现报告确认：手机屏成功
 
 发版流程：改 `VERSION` 并提交 → `git tag -a v<版本> -m "…"` 并推送标签 → 在 Actions 里批准 `release` 环境 → 跑完到 Releases 页核对 dmg 能正常下载、双击打开不被 Gatekeeper 拦。应用内更新仍走原来的更新源，GitHub 这条只管下载包。
 
+## 检查更新修复与 2.5.1（2026-11-19）
+
+原 fork 的「检查更新」是坏的：默认更新源指向从未配置的占位地址，且 Release 里没有应用内更新需要的清单与更新包。修复（commit 0a88829）：更新源只保留 GitHub、默认即 GitHub（存量配置里的旧值会走已有的未知源回退，自动落到 GitHub）；release 流程在打包后生成更新清单（update.json）并把更新包（.pack）一并挂到 Release。已发布的版本不重打——修复随热修复版 **2.5.1** 发出（run 44490954113，机主审批后全程绿）。服务端已验证：v2.5.1 Release 四件资产齐全（DMG、.sha256、.pack、update.json），应用实际读取的 `releases/latest/download/update.json` 可拉取，版本 2.5.1、包名与发布说明无误。存量 2.5.0 安装需在设置里把更新源切到 GitHub 一次，之后即可应用内升级到 2.5.1（默认源的修复随 2.5.1 本体生效）。
+
 ## 许可证与致谢
 
 沿用上游 MIT 许可证（见 `LICENSE`），版权归原作者 AoyamaShou 与 zephyr4123 所有。
