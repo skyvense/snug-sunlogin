@@ -14,8 +14,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var phone = PhoneChoice.standard
     /// 是否已看过首次启动的欢迎页
     public var welcomed = false
-    /// 从哪检查和下载更新。向日葵 的用户基本在国内，默认腾讯云
-    public var updateSource = UpdateSource.tencent
+    /// 从哪检查和下载更新。本 fork 只有 GitHub 一个源（上游的腾讯云国内源没有配置）
+    public var updateSource = UpdateSource.github
     /// 上次运行的版本：和这次不一样说明刚换了版本，启动时弹「关于 Snug」
     public var lastVersion: Version?
 

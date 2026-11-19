@@ -121,7 +121,7 @@ enum RenderSamples {
                 u.check = .available(sampleFeed)
                 u.phase = .downloading(0.42)
             },
-            aboutSample("about-unreachable") { $0.problem = .unreachable(.tencent) },
+            aboutSample("about-unreachable") { $0.problem = .unreachable(.github) },
             aboutSample("about-cannot-replace") { u in
                 u.check = .available(sampleFeed)
                 u.problem = .cannotReplace
