@@ -1,11 +1,11 @@
-// 解析 `log stream --style ndjson` 里 UURemoteServer 的推流与编码事件。
+// 解析 `log stream --style ndjson` 里 AweSun 的推流与编码事件。
 // 这些行来自 ScreenCaptureKit / VideoToolbox 的调试日志，格式不是公开接口，所以只认几条稳定的关键字，
 // 认不出的行一律忽略。格式变了，认不出开始事件时推流信号缺席，认不出停止事件时推流会一直显示在进行，后果见 ConnectionTracker
 import Foundation
 
 public enum CaptureLogEvent: Equatable, Sendable {
     /// -[SCDisplay initWithDict:] … displayID=N：ScreenCaptureKit 描述了一块屏。
-    /// UU 枚举全部屏幕时每块都会出现一次，为要推的那块建过滤器时再出现一次，紧接着推流开始
+    /// 向日葵 枚举全部屏幕时每块都会出现一次，为要推的那块建过滤器时再出现一次，紧接着推流开始
     case displayDescribed(DisplayID)
     /// -[SCStream startCaptureWithCompletionHandler:]
     case captureStarted
@@ -15,14 +15,14 @@ public enum CaptureLogEvent: Equatable, Sendable {
     case encoderCreated
     /// 编码会话结束，带「encoded N dropped M duration D [ms]」摘要：真正推过流的会话
     case encoderEnded(encoded: Int, dropped: Int, durationMs: Int)
-    /// 编码会话结束但没有摘要：UU 试探编码参数时建了就扔的会话，不代表推流结束
+    /// 编码会话结束但没有摘要：向日葵 试探编码参数时建了就扔的会话，不代表推流结束
     case encoderProbeEnded
 }
 
 public struct CaptureLogRecord: Equatable, Sendable {
     public let date: Date
     public let event: CaptureLogEvent
-    /// 打这条日志的 UURemoteServer 进程号；读不到为 nil
+    /// 打这条日志的 AweSun 进程号；读不到为 nil
     public let processID: pid_t?
 
     public init(date: Date, event: CaptureLogEvent, processID: pid_t? = nil) {
@@ -36,7 +36,7 @@ public struct CaptureLogParser {
     /// classify 认的几类行都含其中一个词。log 子进程按它过滤：Snug 少收、少解析，回看几个小时的日志也只有几百行
     static let keywords = ["SCDisplay initWithDict:", "CaptureWithCompletionHandler:]", "Stopping stream due to", "VTCompressionSession"]
     /// `log stream` / `log show` 的 --predicate
-    public static let predicate = "process == \"\(UURemote.serverProcess)\" AND ("
+    public static let predicate = "process == \"\(Sunlogin.serverProcess)\" AND ("
         + keywords.map { "eventMessage CONTAINS \"\($0)\"" }.joined(separator: " OR ") + ")"
 
     private let formatter: DateFormatter
@@ -48,14 +48,14 @@ public struct CaptureLogParser {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSSZ"
     }
 
-    /// 一行 ndjson → 事件；不是 UURemoteServer 的、认不出的、非 JSON 的都返回 nil
+    /// 一行 ndjson → 事件；不是 AweSun 的、认不出的、非 JSON 的都返回 nil
     public func parse(line: String) -> CaptureLogRecord? {
         guard line.hasPrefix("{"),
               let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
               let message = object["eventMessage"] as? String,
               let stamp = object["timestamp"] as? String,
               let date = formatter.date(from: stamp) else { return nil }
-        if let process = object["processImagePath"] as? String, !process.hasSuffix("/" + UURemote.serverProcess) { return nil }
+        if let process = object["processImagePath"] as? String, !process.hasSuffix("/" + Sunlogin.serverProcess) { return nil }
         let processID = (object["processID"] as? Int).flatMap(pid_t.init(exactly:))
         return Self.classify(message).map { CaptureLogRecord(date: date, event: $0, processID: processID) }
     }

@@ -14,6 +14,8 @@ struct AboutView: View {
     }
 
     private let credits = [
+        Credit(name: "Snug", url: "https://github.com/zephyr4123/snug",
+               author: "zephyr4123", usage: "原项目，本分支从其代码修改而来"),
         Credit(name: "UUyc-companion", url: "https://github.com/aoyamashou/UUyc-companion",
                author: "AoyamaShou", usage: "项目前身"),
         Credit(name: "PermissionFlow", url: "https://github.com/jaywcjlove/PermissionFlow",
@@ -37,7 +39,8 @@ struct AboutView: View {
                             Text(Updater.current?.description ?? "开发版").foregroundStyle(.secondary).monospacedDigit()
                         }
                         Text("手机远程 Mac 的显示与触控增强")
-                        Link("github.com/zephyr4123/snug", destination: URL(string: "https://github.com/zephyr4123/snug")!)
+                        Text("向日葵移植版 · 从原作者 Snug（zephyr4123）的代码修改而来").foregroundStyle(.secondary)
+                        Link("github.com/skyvense/snug-sunlogin", destination: URL(string: "https://github.com/skyvense/snug-sunlogin")!)
                     }
                 }
                 .padding(.vertical, 4)
@@ -58,7 +61,7 @@ struct AboutView: View {
             } header: {
                 Text("致谢（MIT 许可）")
             } footer: {
-                Text("非 UU远程 官方软件").font(.footnote).foregroundStyle(.secondary)
+                Text("非 向日葵 官方软件").font(.footnote).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

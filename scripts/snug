@@ -12,9 +12,9 @@
 set -euo pipefail
 cd "${0:A:h}/.."
 
-readonly BUNDLE_ID="com.zephyr4123.snug"
+readonly BUNDLE_ID="io.github.skyvense.snugsunlogin"
 readonly APP="build/Snug.app"
-readonly REPO_URL="https://github.com/zephyr4123/snug"
+readonly REPO_URL="https://github.com/skyvense/snug-sunlogin"
 # gh 的 release 命令都发到这个仓库。不写明时 gh 自己从 git 远端里挑，有 upstream 就挑 upstream：
 # 2.0.0 发版时它挑中了原作者的 aoyamashou/UUyc-companion，靠 --verify-tag 才没发过去
 export GH_REPO="${REPO_URL#https://github.com/}"

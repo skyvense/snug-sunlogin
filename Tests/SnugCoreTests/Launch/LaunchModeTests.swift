@@ -64,9 +64,40 @@ struct LaunchModeTests {
         #expect(try LaunchMode.parse(ModeTarget.hiDPI(width: 540, height: 1170).arguments(display: 9)) == .setMode(display: 9, to: .hiDPI(width: 540, height: 1170)))
     }
 
-    @Test("--dump-uu、--preview-phone")
+    @Test("--restore-rotation <屏幕编号> <角度> session|permanent：只认 0/90/180/270，别的角度报错")
+    func restoreRotation() throws {
+        #expect(try LaunchMode.parse(["--restore-rotation", "3", "90", "permanent"])
+                == .setMode(display: 3, to: .rotation(degrees: 90, permanently: true)))
+        #expect(try LaunchMode.parse(["--restore-rotation", "3", "0", "session"])
+                == .setMode(display: 3, to: .rotation(degrees: 0, permanently: false)))
+        #expect(throws: LaunchModeError.invalidNumber("--restore-rotation", "45")) {
+            try LaunchMode.parse(["--restore-rotation", "3", "45", "session"])
+        }
+        #expect(throws: LaunchModeError.invalidNumber("--restore-rotation", "abc")) {
+            try LaunchMode.parse(["--restore-rotation", "3", "abc", "session"])
+        }
+        #expect(throws: LaunchModeError.invalidNumber("--restore-rotation", "forever")) {
+            try LaunchMode.parse(["--restore-rotation", "3", "90", "forever"])
+        }
+    }
+
+    @Test("帮手把旋转原样传下去：设回旋转的参数由同一个目标拼出来，读回来不走样")
+    func restoreRotationRoundTrip() throws {
+        for degrees in [0.0, 90.0, 180.0, 270.0] {
+            for permanently in [true, false] {
+                let target = ModeTarget.rotation(degrees: degrees, permanently: permanently)
+                guard case .setMode(9, .rotation(let parsed, let scope)) = try LaunchMode.parse(target.arguments(display: 9)) else {
+                    Issue.record("没解析成设回旋转")
+                    continue
+                }
+                #expect(parsed == degrees && scope == permanently)
+            }
+        }
+    }
+
+    @Test("--dump-sunlogin、--preview-phone")
     func flags() throws {
-        #expect(try LaunchMode.parse(["--dump-uu"]) == .dumpUU)
+        #expect(try LaunchMode.parse(["--dump-sunlogin"]) == .dumpSunlogin)
         #expect(try LaunchMode.parse(["--preview-phone"]) == .previewPhone)
     }
 
@@ -77,8 +108,8 @@ struct LaunchModeTests {
         #expect(throws: LaunchModeError.missingValue("--set-mode")) { try LaunchMode.parse(["--set-mode", "14", "540"]) }
         #expect(throws: LaunchModeError.invalidNumber("--set-mode", "abc")) { try LaunchMode.parse(["--set-mode", "abc", "540", "950"]) }
         #expect(throws: LaunchModeError.invalidNumber("--set-mode", "0")) { try LaunchMode.parse(["--set-mode", "14", "0", "950"]) }
-        #expect(throws: LaunchModeError.conflicting("--dump-uu", "--render-about")) {
-            try LaunchMode.parse(["--dump-uu", "--render-about", "/tmp/out"])
+        #expect(throws: LaunchModeError.conflicting("--dump-sunlogin", "--render-about")) {
+            try LaunchMode.parse(["--dump-sunlogin", "--render-about", "/tmp/out"])
         }
     }
 

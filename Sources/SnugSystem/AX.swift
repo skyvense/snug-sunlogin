@@ -1,4 +1,4 @@
-// 辅助功能接口的薄封装：搬窗口（WindowService）、按菜单新建窗口（AppService）和感知 UU（读控制端表格）共用。
+// 辅助功能接口的薄封装：搬窗口（WindowService）、按菜单新建窗口（AppService）和感知 向日葵（读控制端表格）共用。
 // 超时：App 卡住时辅助功能的每次调用要等满超时，系统默认约 6 秒；Snug 把本进程的全局超时设成 1 秒（configureTimeout）。
 // 两个私有接口（_AXUIElementGetWindow、_AXUIElementCreateWithRemoteToken）只在这个文件里用
 import AppKit

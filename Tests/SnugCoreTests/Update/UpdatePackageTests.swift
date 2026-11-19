@@ -193,7 +193,7 @@ struct ReleaseNoteTests {
     - 只采纳当前服务进程的记录
 
     其他
-    - `--dump-uu` 输出各表格行的文字
+    - `--dump-sunlogin` 输出各表格行的文字
 
     安装
     - 退出旧版后，下载 Snug-2.0.1.dmg，拖入「应用程序」替换即可
@@ -219,7 +219,7 @@ struct ReleaseNoteTests {
             .bullet("主窗口停留在首页时，手机屏会被误判为断开并移除（#1）"),
             .bullet("只采纳当前服务进程的记录"),
             .heading("其他"),
-            .bullet("`--dump-uu` 输出各表格行的文字"),
+            .bullet("`--dump-sunlogin` 输出各表格行的文字"),
             .paragraph("感谢 @gaofeng21cn 定位这个问题（#2）。"),
         ])
     }

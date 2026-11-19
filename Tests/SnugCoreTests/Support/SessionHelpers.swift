@@ -8,4 +8,4 @@ let t0 = Date(timeIntervalSinceReferenceDate: 800_000_000)
 func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }
 
 /// 只有控制端表格认出了控制端的观测（覆盖窗口不在、推流未知）
-func table(_ names: String...) -> UUSignals { UUSignals(overlayVisible: false, controllers: .shown(names), captureActive: nil) }
+func table(_ names: String...) -> SunloginSignals { SunloginSignals(overlayVisible: false, controllers: .shown(names), captureActive: nil) }

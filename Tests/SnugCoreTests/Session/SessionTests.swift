@@ -36,8 +36,8 @@ struct SessionEpisodeTests {
 
 @Suite("远程会话 RemoteSession")
 struct RemoteSessionTests {
-    private let present = UUSignals(overlayVisible: false, controllers: .shown(["iPhone"]), captureActive: nil)
-    private let absent = UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: nil)
+    private let present = SunloginSignals(overlayVisible: false, controllers: .shown(["iPhone"]), captureActive: nil)
+    private let absent = SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: nil)
 
     @Test("连入 → began；断开 → interrupted；窗口内重连 → resumed；窗口过后 → ended")
     func transitions() {
@@ -65,7 +65,7 @@ struct RemoteSessionTests {
     @Test("控制端变化透传为 controllersChanged")
     func controllersChanged() {
         var s = RemoteSession()
-        _ = s.update(UUSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil), now: at(0))
+        _ = s.update(SunloginSignals(overlayVisible: true, controllers: .unreadable, captureActive: nil), now: at(0))
         #expect(s.update(present, now: at(0.5)) == [.controllersChanged(["iPhone"])])
         #expect(s.controllers == ["iPhone"])
     }
@@ -73,8 +73,8 @@ struct RemoteSessionTests {
     @Test("回归 #1：没认出控制端、推流一直在，远程不断开；停流后照常 interrupted、ended")
     func unrecognizedTableKeepsStreamingSession() {
         var s = RemoteSession()
-        let streaming = UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: true)
-        let stopped = UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: false)
+        let streaming = SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: true)
+        let stopped = SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: false)
         #expect(s.update(streaming, now: at(0)) == [.began(controllers: [])])
         for seconds in [0.5, 59.5, 60, 60.5, 75.6, 300] {
             #expect(s.update(streaming, now: at(seconds)) == [])
@@ -97,8 +97,8 @@ struct RemoteSessionTests {
 
 @Suite("要不要手机屏 RemoteSession.wantsPhoneScreen")
 struct PhoneDemandTests {
-    private let overlayOnly = UUSignals(overlayVisible: true, controllers: .unrecognized, captureActive: nil)
-    private let absent = UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: nil)
+    private let overlayOnly = SunloginSignals(overlayVisible: true, controllers: .unrecognized, captureActive: nil)
+    private let absent = SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: nil)
 
     @Test("电脑控制端：断开后的重连窗口里也不要（断开那一拍名字被清空，不能当成手机）")
     func computerStaysComputerWhileReconnecting() {
@@ -131,7 +131,7 @@ struct PhoneDemandTests {
         var s = RemoteSession()
         #expect(s.update(overlayOnly, now: at(0)) == [.began(controllers: [])])
         #expect(!s.wantsPhoneScreen(now: at(0)))
-        #expect(s.update(UUSignals(overlayVisible: true, controllers: .shown(["MacBook Air"]), captureActive: nil), now: at(0.5))
+        #expect(s.update(SunloginSignals(overlayVisible: true, controllers: .shown(["MacBook Air"]), captureActive: nil), now: at(0.5))
                 == [.controllersChanged(["MacBook Air"])])
         #expect(!s.wantsPhoneScreen(now: at(0.5)))
         #expect(!s.wantsPhoneScreen(now: at(5)))
@@ -140,7 +140,7 @@ struct PhoneDemandTests {
     @Test("一直没拿到名字（表格读不到或没认出控制端）：等满 2 秒后按手机处理", arguments: [ControllerTable.unreadable, .unrecognized])
     func namelessGetsScreenAfterGrace(table: ControllerTable) {
         var s = RemoteSession()
-        _ = s.update(UUSignals(overlayVisible: true, controllers: table, captureActive: nil), now: at(0))
+        _ = s.update(SunloginSignals(overlayVisible: true, controllers: table, captureActive: nil), now: at(0))
         #expect(!s.wantsPhoneScreen(now: at(1.9)))
         #expect(s.wantsPhoneScreen(now: at(2)))
     }
@@ -162,7 +162,7 @@ struct PhoneDemandTests {
         #expect(!s.wantsPhoneScreen(now: at(135.1)))
     }
 
-    @Test("几台同时连着，表格漏读一拍手机那一行（手机先连、电脑后连时 UU 先单独显示新来的）：一直要")
+    @Test("几台同时连着，表格漏读一拍手机那一行（手机先连、电脑后连时 向日葵 先单独显示新来的）：一直要")
     func missedRowKeepsScreen() {
         var s = RemoteSession()
         _ = s.update(table("iPhone"), now: at(0))
@@ -189,7 +189,7 @@ struct PhoneDemandTests {
     @Test("几台一起断开、重连时电脑先回来：手机照样等满重连窗口")
     func computerResumesFirst() {
         var s = RemoteSession()
-        let absent = UUSignals(overlayVisible: false, controllers: .unrecognized, captureActive: nil)
+        let absent = SunloginSignals(overlayVisible: false, controllers: .unrecognized, captureActive: nil)
         _ = s.update(table("MacBook Pro", "iPhone"), now: at(0))
         _ = s.update(absent, now: at(1))
         #expect(s.update(absent, now: at(2)) == [.interrupted])

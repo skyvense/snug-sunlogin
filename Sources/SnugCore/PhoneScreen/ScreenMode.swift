@@ -41,6 +41,10 @@ public enum ModeTarget: Equatable, Sendable, CustomStringConvertible {
     case hiDPI(width: Int, height: Int)
     /// 别的屏：设回这个模式。permanently 时连永久配置一起写，否则只对本次登录生效
     case exact(ScreenMode, permanently: Bool)
+    /// 别的屏：把旋转设回这个角度（度，CGDisplayRotation 的方向：顺时针为正，只认 0/90/180/270）。
+    /// 和模式分开设：换屏幕组合时 macOS 可能只把旋转拨回 0°，模式的宽高看着没变；也可能先拨模式再拨旋转，
+    /// 所以设回时先设模式、再设旋转。permanently 的含义同 exact
+    case rotation(degrees: Double, permanently: Bool)
 
     /// 交给帮手的命令行参数，LaunchMode 按同一套解析回来
     public func arguments(display: DisplayID) -> [String] {
@@ -51,6 +55,8 @@ public enum ModeTarget: Equatable, Sendable, CustomStringConvertible {
             // 编号按无符号写：负数在命令行上是单横线开头，会被当成系统塞进来的参数过滤掉
             ["--restore-mode", "\(display)", "\(UInt32(bitPattern: m.ioModeID))", "\(m.width)", "\(m.height)", "\(m.pixelWidth)", "\(m.pixelHeight)",
              "\(m.refreshRate)", permanently ? Self.permanent : Self.session]
+        case .rotation(let degrees, let permanently):
+            ["--restore-rotation", "\(display)", "\(degrees)", permanently ? Self.permanent : Self.session]
         }
     }
 
@@ -61,6 +67,7 @@ public enum ModeTarget: Equatable, Sendable, CustomStringConvertible {
         switch self {
         case .hiDPI(let width, let height): "2 倍 \(width)x\(height)"
         case .exact(let mode, let permanently): "\(mode)（模式 \(mode.ioModeID)，\(permanently ? "连永久配置" : "只对本次登录")）"
+        case .rotation(let degrees, let permanently): "旋转 \(degrees)°（\(permanently ? "连永久配置" : "只对本次登录")）"
         }
     }
 }
@@ -71,13 +78,16 @@ public struct OtherDisplay: Equatable, Sendable {
     /// 在「显示器」设置里的名字，日志用
     public var name: String
     public var mode: ScreenMode
+    /// 旋转角度（度，CGDisplayRotation：顺时针为正）。竖屏是 90° 或 270°，横屏是 0°
+    public var rotation: Double
     /// 睡着了（Mac 锁屏后几秒显示器就睡）：这时改不了模式
     public var asleep: Bool
 
-    public init(id: DisplayID, name: String, mode: ScreenMode, asleep: Bool = false) {
+    public init(id: DisplayID, name: String, mode: ScreenMode, rotation: Double = 0, asleep: Bool = false) {
         self.id = id
         self.name = name
         self.mode = mode
+        self.rotation = rotation
         self.asleep = asleep
     }
 }

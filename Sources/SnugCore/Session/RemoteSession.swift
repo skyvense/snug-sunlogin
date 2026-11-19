@@ -38,7 +38,7 @@ public struct RemoteSession: Sendable {
         return group + lingering.keys.sorted()
     }
 
-    public mutating func update(_ signals: UUSignals, now: Date) -> [SessionTransition] {
+    public mutating func update(_ signals: SunloginSignals, now: Date) -> [SessionTransition] {
         var out: [SessionTransition] = []
         if episode.advance(to: now) == .ended {
             out.append(.ended)

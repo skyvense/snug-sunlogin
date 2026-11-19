@@ -1,6 +1,6 @@
 // 手势翻译和 CGEvent 之间的读写：接管哪几种事件、事件类型对应 TouchInput 的哪一种、拼要补发的事件、打上记号发出去；
-// UUEventSource 认哪些事件是 UURemoteServer 注入的。监听线程、状态机和按 TouchCommand 分派在 TouchTap。
-// 补发的事件打上记号：拷贝出来的事件保留 UU 的进程号，不打记号会被自己再接管一次，来回打转
+// SunloginEventSource 认哪些事件是 AweSun 注入的。监听线程、状态机和按 TouchCommand 分派在 TouchTap。
+// 补发的事件打上记号：拷贝出来的事件保留 向日葵 的进程号，不打记号会被自己再接管一次，来回打转
 import CoreGraphics
 import Darwin
 import Foundation
@@ -10,7 +10,7 @@ enum TouchEvents {
     /// eventSourceUserData 里的记号（'SNUG'）
     private static let marker: Int64 = 0x534E_5547
 
-    /// 接管的事件：只有鼠标左键（UU 把手指的按下、拖动、抬起都当成左键发过来）
+    /// 接管的事件：只有鼠标左键（向日葵 把手指的按下、拖动、抬起都当成左键发过来）
     static let mask = [CGEventType.leftMouseDown, .leftMouseDragged, .leftMouseUp].reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
 
     static func kind(of type: CGEventType) -> TouchInput.Kind? {
@@ -57,19 +57,24 @@ enum TouchEvents {
     }
 }
 
-/// 认 UURemoteServer 注入的事件：按来源进程号查可执行文件名，按进程号缓存。本机的触控板、鼠标不是它发的，一律不认
-struct UUEventSource {
-    private var known: [pid_t: Bool] = [:]
+/// 认 AweSun 注入的事件：按来源进程号查可执行文件名，按进程号缓存。本机的触控板、鼠标不是它发的，一律不认
+struct SunloginEventSource {
+    private var known: [pid_t: String] = [:]
 
-    mutating func sent(_ event: CGEvent) -> Bool {
+    /// 事件来源进程的可执行文件名；进程号查不到（本机硬件输入的来源进程号多半是 0）时返回空串
+    mutating func sourceName(_ event: CGEvent) -> String {
         let pid = pid_t(event.getIntegerValueField(.eventSourceUnixProcessID))
-        guard pid > 0 else { return false }
-        if let match = known[pid] { return match }
+        guard pid > 0 else { return "" }
+        if let name = known[pid] { return name }
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         let length = Int(proc_pidpath(pid, &buffer, UInt32(buffer.count)))
         let path = length > 0 ? String(decoding: buffer.prefix(length).map { UInt8(bitPattern: $0) }, as: UTF8.self) : ""
-        let match = (path as NSString).lastPathComponent == UURemote.serverProcess
-        known[pid] = match
-        return match
+        let name = (path as NSString).lastPathComponent
+        known[pid] = name
+        return name
+    }
+
+    mutating func sent(_ event: CGEvent) -> Bool {
+        sourceName(event) == Sunlogin.serverProcess
     }
 }

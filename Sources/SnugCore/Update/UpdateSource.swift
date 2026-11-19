@@ -14,8 +14,8 @@ public enum UpdateSource: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    private static let tencentBase = URL(string: "https://dl.zephyrxiang.com/snug")!
-    private static let githubBase = URL(string: "https://github.com/zephyr4123/snug/releases")!
+    private static let tencentBase = URL(string: "https://example.invalid/snug-sunlogin")!
+    private static let githubBase = URL(string: "https://github.com/skyvense/snug-sunlogin/releases")!
 
     /// 最新发布的 update.json
     public var feedURL: URL {

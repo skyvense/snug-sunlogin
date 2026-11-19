@@ -21,7 +21,7 @@ struct SettingsView: View {
             }
             Section {
                 Toggle(isOn: binding(\.config.phoneScreen, intents.setPhoneScreen)) {
-                    SettingLabel("手机屏", detail: "UU远程 中增加竖屏", symbol: "iphone", tint: .blue)
+                    SettingLabel("手机屏", detail: "向日葵 中增加竖屏", symbol: "iphone", tint: .blue)
                 }
                 LabeledContent {
                     PhoneMenu(state: state, choose: intents.setPhone)

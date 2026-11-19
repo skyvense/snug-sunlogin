@@ -9,6 +9,8 @@ import Testing
 private let redmi60 = ScreenMode(ioModeID: 12, width: 2560, height: 1440, pixelWidth: 2560, pixelHeight: 1440, refreshRate: 60)
 private let redmi30 = ScreenMode(ioModeID: 13, width: 2560, height: 1440, pixelWidth: 2560, pixelHeight: 1440, refreshRate: 30)
 private let hp = ScreenMode(ioModeID: 5, width: 1080, height: 1920, pixelWidth: 1080, pixelHeight: 1920, refreshRate: 60)
+/// 同一块竖屏被转回横向后的样子（宽高互换）
+private let hpLandscape = ScreenMode(ioModeID: 6, width: 1920, height: 1080, pixelWidth: 1920, pixelHeight: 1080, refreshRate: 60)
 private let builtIn = ScreenMode(ioModeID: 54, width: 1512, height: 982, pixelWidth: 3024, pixelHeight: 1964, refreshRate: 120)
 
 @Suite("加屏、撤屏不动别的屏 PhoneDesk")
@@ -24,6 +26,36 @@ struct PhoneDeskModeTests {
         await rig.desk.idle()
         #expect(rig.journal.all == ["snapshot", "retire 101", "mode 1 \(redmi60) 永久", "restore"])
         #expect(rig.displays.others == [1: redmi60, 3: hp])
+    }
+
+    @Test("撤屏时竖屏被转回横向：模式和旋转一起设回撤屏前的样子（先模式、再旋转），连永久配置一起写")
+    func retireKeepsRotation() async throws {
+        let rig = try Rig()
+        rig.displays.others = [1: hp]
+        rig.displays.rotations = [1: 90]
+        await rig.ready()
+        rig.displays.onRetire = { [unowned displays = rig.displays] in
+            displays.others[1] = hpLandscape
+            displays.rotations[1] = 0
+        }
+        rig.desk.setWanted(false)
+        await rig.desk.idle()
+        #expect(rig.journal.all == ["snapshot", "retire 101", "mode 1 \(hp) 永久", "rotation 1 90.0 永久", "restore"])
+        #expect(rig.displays.others == [1: hp])
+        #expect(rig.displays.rotations == [1: 90])
+    }
+
+    @Test("只有旋转被拨动、模式没变时：只设旋转，不碰模式（假系统里单独拨旋转，隔离这条路径）")
+    func retireKeepsRotationOnly() async throws {
+        let rig = try Rig()
+        rig.displays.others = [1: redmi60]
+        rig.displays.rotations = [1: 90]
+        await rig.ready()
+        rig.displays.onRetire = { [unowned displays = rig.displays] in displays.rotations[1] = 0 }
+        rig.desk.setWanted(false)
+        await rig.desk.idle()
+        #expect(rig.journal.all == ["snapshot", "retire 101", "rotation 1 90.0 永久", "restore"])
+        #expect(rig.displays.rotations == [1: 90])
     }
 
     @Test("显示器睡着时（Mac 锁屏）撤的屏要等唤醒才下线：下线前不动，下线那一刻 macOS 才拨动别的屏，这时再设回、放回窗口")
@@ -82,7 +114,7 @@ struct PhoneDeskModeTests {
         await rig.desk.idle()
         #expect(!rig.journal.all.contains { $0.hasSuffix("永久") })
 
-        // 远程结束，UU 把主屏还原成 60Hz（只对本次登录）；屏还睡着时等着
+        // 远程结束，向日葵 把主屏还原成 60Hz（只对本次登录）；屏还睡着时等着
         rig.journal.clear()
         rig.displays.others[1] = redmi60
         rig.displays.asleep = [1, 3]

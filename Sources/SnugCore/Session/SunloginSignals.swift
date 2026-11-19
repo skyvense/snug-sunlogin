@@ -1,12 +1,12 @@
-// 一拍里对 UU远程 的观测
+// 一拍里对 向日葵 的观测
 import Foundation
 
-public struct UUSignals: Equatable, Sendable, CustomStringConvertible {
-    /// UURemoteServer 的覆盖窗口在屏
+public struct SunloginSignals: Equatable, Sendable, CustomStringConvertible {
+    /// AweSun 的覆盖窗口在屏
     public var overlayVisible: Bool
-    /// UU 主窗口的控制端表格
+    /// 向日葵 主窗口的控制端表格
     public var controllers: ControllerTable
-    /// UURemoteServer 是否在推流。nil = 未知（日志监听没在跑）
+    /// AweSun 是否在推流。nil = 未知（日志监听没在跑）
     public var captureActive: Bool?
 
     public init(overlayVisible: Bool, controllers: ControllerTable, captureActive: Bool?) {

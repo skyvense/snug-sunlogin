@@ -1,8 +1,8 @@
-// 推流信号：起一个 `/usr/bin/log stream` 子进程，只看 UURemoteServer 推流相关的几类日志，逐行交给 CaptureLogParser。
-// 每次（重新）启动先用 `log show` 回看 replayWindow：UU 的常驻推流只在远程开头打一次「开始」，
+// 推流信号：起一个 `/usr/bin/log stream` 子进程，只看 AweSun 推流相关的几类日志，逐行交给 CaptureLogParser。
+// 每次（重新）启动先用 `log show` 回看 replayWindow：向日葵 的常驻推流只在远程开头打一次「开始」，
 // 远程中途打开 Snug（升级、崩溃后自启）或子进程重启时不回看，就会以为没在推。回看完成前推流状态报「未知」。
 // 子进程挂了按退避重启（1→2→5→10→30→60s），跑满 60s 算稳定、退避清零；每次退出与重启都记日志。
-// UURemoteServer 换了进程（崩溃重启），旧的推流状态作废：它崩溃时不会留下停流的日志。回看也只认当前进程打的日志。
+// AweSun 换了进程（崩溃重启），旧的推流状态作废：它崩溃时不会留下停流的日志。回看也只认当前进程打的日志。
 // 没在跑的时候推流状态报「未知」（nil），连接判定照样靠覆盖窗口和控制端表格
 import Foundation
 import SnugCore
@@ -12,7 +12,7 @@ final class CaptureLogWatcher {
     static let restartDelays: [TimeInterval] = [1, 2, 5, 10, 30, 60]
     static let stableAfter: TimeInterval = 60
     static let streamArguments = ["stream", "--style", "ndjson", "--predicate", CaptureLogParser.predicate]
-    /// 回看多久（实测 4 小时约 2 秒、几百行）。比这更早开始的远程，要等 UU 下一次开推（切屏）才认得出
+    /// 回看多久（实测 4 小时约 2 秒、几百行）。比这更早开始的远程，要等 向日葵 下一次开推（切屏）才认得出
     nonisolated static let replayWindow = "4h"
     nonisolated static let replayArguments = ["show", "--last", replayWindow, "--style", "ndjson", "--predicate", CaptureLogParser.predicate]
 
@@ -48,12 +48,12 @@ final class CaptureLogWatcher {
         return (state.isActive(at: date), state.streamingDisplay(at: date))
     }
 
-    /// UURemoteServer 换了进程（或没了），旧的推流状态作废
+    /// AweSun 换了进程（或没了），旧的推流状态作废
     private func noteServerProcess() {
-        let pid = UURemoteApp.serverPID()
+        let pid = SunloginApp.serverPID()
         guard pid != serverPID else { return }
         if serverPID != nil {
-            Log.warn("UURemoteServer 进程变了（\(serverPID.map(String.init) ?? "-") → \(pid.map(String.init) ?? "没在运行")），推流状态重来")
+            Log.warn("AweSun 进程变了（\(serverPID.map(String.init) ?? "-") → \(pid.map(String.init) ?? "没在运行")），推流状态重来")
             state = CaptureSessionState()
         }
         serverPID = pid
@@ -101,7 +101,7 @@ final class CaptureLogWatcher {
         launchedAt = Date()
         state = CaptureSessionState()
         buffered = []
-        serverPID = UURemoteApp.serverPID()
+        serverPID = SunloginApp.serverPID()
         Log.info("推流日志监听已启动（log pid \(p.processIdentifier)\(failures > 0 ? "，第 \(failures) 次重启" : "")），回看 \(Self.replayWindow)")
         replay(generation: gen)
     }
@@ -155,10 +155,10 @@ final class CaptureLogWatcher {
         state = CaptureSessionState.resumed(history: history ?? [], live: live, server: serverPID)
         let now = Date()
         let summary = state.isActive(at: now)
-            ? "UU 正在推流（屏 \(state.streamingDisplay(at: now).map(String.init) ?? "未知")）" : "UU 没在推流"
+            ? "向日葵 正在推流（屏 \(state.streamingDisplay(at: now).map(String.init) ?? "未知")）" : "向日葵 没在推流"
         // 只数当前进程的：上一个进程的记录不参与回放，日志里要看得出来
         let mine = history.map { h in h.filter { serverPID != nil && $0.processID == serverPID }.count }
-        Log.info("推流日志回看完成（\(history.map { "\($0.count) 条，当前 UURemoteServer 的 \(mine ?? 0) 条" } ?? "失败，只看实时日志")）：\(summary)")
+        Log.info("推流日志回看完成（\(history.map { "\($0.count) 条，当前 AweSun 的 \(mine ?? 0) 条" } ?? "失败，只看实时日志")）：\(summary)")
     }
 
     private func exited(status: Int32, stderr: String, generation gen: Int) {

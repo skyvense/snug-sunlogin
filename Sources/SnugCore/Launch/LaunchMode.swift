@@ -17,8 +17,8 @@ public enum LaunchMode: Equatable, Sendable {
     case previewPhone
     /// 只把界面渲染成 PNG
     case render(RenderTarget, output: URL)
-    /// 打印从 UU远程 读到的控制端与屏幕
-    case dumpUU
+    /// 打印从 向日葵 读到的控制端与屏幕
+    case dumpSunlogin
     /// 帮手模式：把一块屏切到 target 后立即退出（手机屏换档，或把加屏、撤屏时被 macOS 拨动的屏设回去）。
     /// 目标由主程序算好传来，帮手不读配置。主程序亲自切模式，手机屏释放时会拖 40 秒以上才下线；交给短命的子进程切就没有这个问题
     case setMode(display: DisplayID, to: ModeTarget)
@@ -30,12 +30,14 @@ public enum LaunchMode: Equatable, Sendable {
       （无参数）                      正常启动
       --preview-phone                 正常启动，不等手机连上就加手机屏（开发自测用）
       --render-<界面> <目录>           把界面渲染成 PNG（界面：\(RenderTarget.allCases.map(\.rawValue).joined(separator: " / "))）
-      --dump-uu                       打印从 UU远程 读到的表格行、控制端与屏幕
+      --dump-sunlogin                       打印从 向日葵 读到的表格行、控制端与屏幕
       --probe-screens <规格> [<规格> …]  实测用：建实验屏、打印模式，按 Ctrl-C 撤掉。规格写成
                                       modes=1180x820+1000x695[,name=名字][,serial=999000001][,cap=像素宽x像素高][,pattern=off][,main=on]
       --set-mode <屏幕编号> <宽> <高>   把手机屏换到这一档（点，2 倍）（主程序内部用）
       --restore-mode <屏幕编号> <模式编号> <宽> <高> <像素宽> <像素高> <刷新率> session|permanent
                                       把一块屏设回这个模式，只对本次登录或连永久配置（主程序内部用）
+      --restore-rotation <屏幕编号> <角度> session|permanent
+                                      把一块屏的旋转设回这个角度（0/90/180/270），只对本次登录或连永久配置（主程序内部用）
     """
 
     public static func parse(_ arguments: [String]) throws -> LaunchMode {
@@ -66,14 +68,19 @@ public enum LaunchMode: Equatable, Sendable {
             guard let r = Double(raw), r.isFinite, r >= 0 else { throw LaunchModeError.invalidNumber(flag, raw) }
             return r
         }
+        func angle() throws -> Double {
+            let raw = try value()
+            guard let a = Double(raw), [0.0, 90.0, 180.0, 270.0].contains(a) else { throw LaunchModeError.invalidNumber(flag, raw) }
+            return a
+        }
         if flag.hasPrefix("--render-"), let target = RenderTarget(rawValue: String(flag.dropFirst("--render-".count))) {
             return .render(target, output: URL(fileURLWithPath: try value()))
         }
         switch flag {
         case "--preview-phone":
             return .previewPhone
-        case "--dump-uu":
-            return .dumpUU
+        case "--dump-sunlogin":
+            return .dumpSunlogin
         case "--probe-screens":
             var specs: [String] = []
             while let spec = rest.first, !spec.hasPrefix("--") {
@@ -91,6 +98,12 @@ public enum LaunchMode: Equatable, Sendable {
             let scope = try value()
             guard [ModeTarget.permanent, ModeTarget.session].contains(scope) else { throw LaunchModeError.invalidNumber(flag, scope) }
             return .setMode(display: display, to: .exact(mode, permanently: scope == ModeTarget.permanent))
+        case "--restore-rotation":
+            let display = try number(DisplayID.self)
+            let degrees = try angle()
+            let scope = try value()
+            guard [ModeTarget.permanent, ModeTarget.session].contains(scope) else { throw LaunchModeError.invalidNumber(flag, scope) }
+            return .setMode(display: display, to: .rotation(degrees: degrees, permanently: scope == ModeTarget.permanent))
         default:
             throw LaunchModeError.unknownFlag(flag)
         }

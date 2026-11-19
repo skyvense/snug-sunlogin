@@ -1,4 +1,4 @@
-// 实测用的实验屏（--probe-screens，见 docs/multi-screen.md 第 7 节）：按给的尺寸建屏，看系统和 UU远程 怎么对待它。
+// 实测用的实验屏（--probe-screens，见 docs/multi-screen.md 第 7 节）：按给的尺寸建屏，看系统和 向日葵 怎么对待它。
 // 一份规格一块屏，写成逗号分隔的 键=值：modes=1180x820+1000x695,name=…,serial=…,cap=4320x2160,pattern=off,main=on。
 // 只用实验身份（999_000_001 起）：实验过的身份会被系统记住模式和像素上限，不能拿正式的或以后要正式用的身份来试；
 // 第一块默认就是以前实验用过的 999_000_001，不多出 ICC 文件
@@ -27,7 +27,7 @@ public struct ProbeScreen: Equatable, Sendable {
     public static let firstSerial: UInt32 = 999_000_001
     public static let baseName = "Snug 实验屏"
 
-    /// 「显示器」设置和 UU远程 屏幕列表里的名字
+    /// 「显示器」设置和 向日葵 屏幕列表里的名字
     public var name: String
     public var serial: UInt32
     /// 都按 2 倍登记（点）；建好后切到第一档

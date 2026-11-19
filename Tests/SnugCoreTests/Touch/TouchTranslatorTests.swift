@@ -26,7 +26,7 @@ struct TouchTranslatorTests {
         #expect(TouchTranslator.holdDuration == 0.5)
     }
 
-    @Test("手机屏外按下：原样放行，之后的拖动、抬起也放行（原来的屏保持原版 UU 手势）")
+    @Test("手机屏外按下：原样放行，之后的拖动、抬起也放行（原来的屏保持原版 向日葵 手势）")
     func outsidePassesThrough() {
         var t = TouchTranslator()
         #expect(t.handle(input(.press, 100, 300, 0), in: elsewhere) == .pass)

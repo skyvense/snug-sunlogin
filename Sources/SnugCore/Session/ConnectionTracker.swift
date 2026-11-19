@@ -1,14 +1,14 @@
-// 连接判定（纯值类型，now 由调用方传入）：把每拍的 UU 观测合成连入 / 换控制端 / 断开。
-// - 在场只认正面证据（UUSignals.isPresent）：覆盖窗口在屏、认出了控制端、推流在进行，有一路就算
+// 连接判定（纯值类型，now 由调用方传入）：把每拍的 向日葵 观测合成连入 / 换控制端 / 断开。
+// - 在场只认正面证据（SunloginSignals.isPresent）：覆盖窗口在屏、认出了控制端、推流在进行，有一路就算
 // - 连入要快：未连接时一看到在场就连入，不做确认延迟
 // - 断开要稳，同时满足两条才判：
-//   1. 连续不在场超过 disconnectDebounce（UU 切屏时覆盖窗口会短暂重建）
-//   2. 过了自扰静默期：本工具自己加屏、撤屏后 quietWindow 内不判。屏幕组合一变，UU 会停流重开、重建窗口，
-//      2026-11-12 19:01 就因为改屏幕扰乱了 UU 的信号被误判为断开，屏幕改回去信号又回来，如此反复
-// - 控制端记一组：UU 允许几台设备同时连着（issue #3：电脑和手机同时连着，只看第一个就把手机当成了电脑）。
+//   1. 连续不在场超过 disconnectDebounce（向日葵 切屏时覆盖窗口会短暂重建）
+//   2. 过了自扰静默期：本工具自己加屏、撤屏后 quietWindow 内不判。屏幕组合一变，向日葵 会停流重开、重建窗口，
+//      2026-11-12 19:01 就因为改屏幕扰乱了 向日葵 的信号被误判为断开，屏幕改回去信号又回来，如此反复
+// - 控制端记一组：向日葵 允许几台设备同时连着（issue #3：电脑和手机同时连着，只看第一个就把手机当成了电脑）。
 //   表格里的顺序是谁先连上，不代表谁在用，所以只比较有哪些人
 // - 推流还在就算远程还在，不设「推流太久就判断开」的上限。上限得靠控制端表格证明「没人」，
-//   可 UU 没被控时根本不显示这张表，没认出控制端只说明没看到：先是 UU 主窗口关着、后是停在首页（issue #1），
+//   可 向日葵 没被控时根本不显示这张表，没认出控制端只说明没看到：先是 向日葵 主窗口关着、后是停在首页（issue #1），
 //   正常远程都被上限误判断开过，而它一次也没在真正该断的时候起过作用。
 //   代价是停流的日志万一全漏掉，手机屏会一直留着：菜单栏照样显示「远程中」，在设置里关掉手机屏就能复原
 //   （退出 Snug 只是暂时撤掉：4 小时内重开，回看日志又会认成推流中）
@@ -33,7 +33,7 @@ public struct ConnectionTracker: Sendable {
         quietUntil = max(quietUntil ?? until, until)
     }
 
-    public mutating func update(_ signals: UUSignals, now: Date) -> ConnectionEvent? {
+    public mutating func update(_ signals: SunloginSignals, now: Date) -> ConnectionEvent? {
         let names = signals.controllers.names
         if signals.isPresent { lastPresentAt = now }
 
@@ -41,7 +41,7 @@ public struct ConnectionTracker: Sendable {
             guard signals.isPresent else { return nil }
             isConnected = true
             controllers = names
-            log("检测到 UU 连入", signals, now: now)
+            log("检测到 向日葵 连入", signals, now: now)
             return .connected(controllers: controllers)
         }
 
@@ -54,7 +54,7 @@ public struct ConnectionTracker: Sendable {
         }
 
         guard let last = lastPresentAt, now.timeIntervalSince(last) > Self.disconnectDebounce, quietPassed(now) else { return nil }
-        log("检测到 UU 断开", signals, now: now)
+        log("检测到 向日葵 断开", signals, now: now)
         isConnected = false
         controllers = []
         return .disconnected
@@ -66,7 +66,7 @@ public struct ConnectionTracker: Sendable {
     }
 
     /// 每次连接事件都留下信号快照，排查误判时才知道是哪一路信号在变
-    private func log(_ what: String, _ signals: UUSignals, now: Date) {
+    private func log(_ what: String, _ signals: SunloginSignals, now: Date) {
         let since = lastPresentAt.map { String(format: "%.2f", now.timeIntervalSince($0)) } ?? "-"
         let quiet = quietUntil.map { now <= $0 ? String(format: " 静默期剩 %.2fs", $0.timeIntervalSince(now)) : "" } ?? ""
         Log.info("\(what)（\(signals) 距上次在场 \(since)s\(quiet)）")

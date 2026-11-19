@@ -1,6 +1,7 @@
 // 显示模式：读此刻是哪一档，以及帮手进程里真正去切（手机屏换档、把被 macOS 拨动的别的屏设回去）。
 // 主程序不亲自切模式：亲自切过模式的进程，这块虚拟屏释放后要拖 40 秒以上才下线（两次实测）；
 // 交给短命的帮手进程（Snug --set-mode / --restore-mode）切完就退出，释放照样 0.1 秒下线
+import CGVirtualDisplayBridge
 import CoreGraphics
 import SnugCore
 
@@ -23,6 +24,11 @@ public enum DisplayMode {
     /// 此刻的模式；屏不在了返回 nil
     public static func current(_ id: DisplayID) -> ScreenMode? {
         CGDisplayCopyDisplayMode(id).map(ScreenMode.init)
+    }
+
+    /// 此刻的旋转角度（度，顺时针为正；屏不在了返回 0）
+    public static func rotation(_ id: DisplayID) -> Double {
+        CGDisplayRotation(id)
     }
 
     /// 此刻 2 倍模式的宽度（点）；不是 2 倍、或屏不在了返回 nil
@@ -53,6 +59,7 @@ public enum DisplayMode {
         switch target {
         case .hiDPI(let width, let height):
             return modes.first { $0.width == width && $0.height == height && $0.pixelWidth == 2 * width }
+        case .rotation: return nil // 旋转不按模式找：apply 开头已分流
         case .exact(let mode, _):
             // 属性相同的可能有好几档：挑回原来那个编号，编号重排了就挑能当桌面用的那一档
             let same = modes.filter { ScreenMode($0).isSame(as: mode) }
@@ -63,10 +70,14 @@ public enum DisplayMode {
     /// 帮手进程里调用：把屏切到 target。手机屏换档只对本次登录生效；设回别的屏按 target 要求，
     /// 连永久配置时写的是 WindowServer 的永久配置（屏幕组合一变，它会把套用来的旧模式存进去：日志「Saving configuration: session, permanent store」）
     public static func apply(_ target: ModeTarget, to id: DisplayID) -> Outcome {
+        if case .rotation(let degrees, let permanently) = target {
+            return applyRotation(degrees, to: id, permanently: permanently)
+        }
         guard let mode = find(target, on: id) else { return .unavailable }
         let scope: CGConfigureOption = switch target {
         case .hiDPI: .forSession
         case .exact(_, let permanently): permanently ? .permanently : .forSession
+        case .rotation: .forSession // 走不到：上面已分流到 applyRotation
         }
         var config: CGDisplayConfigRef?
         let begin = CGBeginDisplayConfiguration(&config)
@@ -79,6 +90,20 @@ public enum DisplayMode {
         let done = CGCompleteDisplayConfiguration(config, scope)
         if done != .success { CGCancelDisplayConfiguration(config) }
         return done == .success ? .switched : .failed(done)
+    }
+
+    /// 帮手进程里调用：把屏的旋转设到 degrees（度，只认 0/90/180/270）。和 apply 分开调：
+    /// 设回时先设模式、再设旋转（模式一换，旋转可能跟着被拨回 0°）。
+    /// 没有公开 API 能设旋转（`CGConfigureDisplayRotation` 不存在）：桥接层的 SnugSetDisplayRotation
+    /// 运行时加载私有框架 MonitorPanel、按类名找 MPDisplay 下发（displayplacer 同款做法），
+    /// 它按系统设置里改旋转的同一条路走，所以 session 与 permanent 两种范围效果相同（都落到系统配置），
+    /// permanently 只为与模式恢复共用一套参数而留。类不在或超时都如实返回失败，调用方只记日志、不卡撤屏
+    public static func applyRotation(_ degrees: Double, to id: DisplayID, permanently: Bool) -> Outcome {
+        switch SnugSetDisplayRotation(id, Int(degrees)) {
+        case 0: return .switched
+        case 1: return .unavailable
+        default: return .failed(.failure)
+        }
     }
 }
 

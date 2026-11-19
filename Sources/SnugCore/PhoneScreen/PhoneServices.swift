@@ -9,7 +9,7 @@ public protocol PhoneDisplays: AnyObject {
     /// 按 fit 建一块手机屏（登记它的每一档），等它上线，尽量切到基准宽度（切不成只记日志、照样返回）。
     /// 上线不了就换备用身份，都不行就抛错
     func create(_ fit: ScreenFit) async throws -> DisplayID
-    /// 换比例：在线换成 fit 的档位（屏不掉线、编号不变，UU 里选中的屏不丢），再切到基准宽度。换不成返回 false，屏还是原来的档位
+    /// 换比例：在线换成 fit 的档位（屏不掉线、编号不变，向日葵 里选中的屏不丢），再切到基准宽度。换不成返回 false，屏还是原来的档位
     func reshape(_ id: DisplayID, to fit: ScreenFit) async -> Bool
     /// 这块屏登记的是哪个比例的档位（建屏或换比例时登记的）；不是这里建的返回 nil。选档只能在它的档位里选
     func fit(_ id: DisplayID) -> ScreenFit?
@@ -31,6 +31,9 @@ public protocol PhoneDisplays: AnyObject {
     func otherDisplays() -> [OtherDisplay]
     /// 把一块别的屏设回这个模式（交给帮手进程），permanently 时连永久配置一起写。设不成只记日志
     func setMode(_ id: DisplayID, _ mode: ScreenMode, permanently: Bool) async
+    /// 把一块别的屏的旋转设回这个角度（度，只认 0/90/180/270，交给帮手进程），permanently 时连永久配置一起写。
+    /// 设不成只记日志；和 setMode 分开调：设回时先设模式、再设旋转
+    func setRotation(_ id: DisplayID, _ degrees: Double, permanently: Bool) async
 }
 
 /// 窗口此刻的样子

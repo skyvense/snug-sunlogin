@@ -142,7 +142,7 @@ public final class PhoneDisplayService: PhoneDisplays {
 
     public func otherDisplays() -> [OtherDisplay] {
         Self.onlineIDs().filter { displays[$0] == nil }.compactMap { id in
-            DisplayMode.current(id).map { OtherDisplay(id: id, name: Screens.name(of: id), mode: $0, asleep: CGDisplayIsAsleep(id) != 0) }
+            DisplayMode.current(id).map { OtherDisplay(id: id, name: Screens.name(of: id), mode: $0, rotation: DisplayMode.rotation(id), asleep: CGDisplayIsAsleep(id) != 0) }
         }
     }
 
@@ -151,6 +151,14 @@ public final class PhoneDisplayService: PhoneDisplays {
         let status = await runHelper(id, .exact(mode, permanently: permanently))
         if status != 0 {
             Log.warn("「\(Screens.name(of: id))」设不回 \(mode)（帮手退出码 \(status.map(String.init) ?? "启动失败")），现在 \(DisplayMode.describe(id))")
+        }
+    }
+
+    /// 旋转设不回去只记日志：模式已经设回去了，不能因为旋转卡住整条撤屏
+    public func setRotation(_ id: DisplayID, _ degrees: Double, permanently: Bool) async {
+        let status = await runHelper(id, .rotation(degrees: degrees, permanently: permanently))
+        if status != 0 {
+            Log.warn("「\(Screens.name(of: id))」旋转设不回 \(degrees)°（帮手退出码 \(status.map(String.init) ?? "启动失败")），现在 \(DisplayMode.rotation(id))°")
         }
     }
 

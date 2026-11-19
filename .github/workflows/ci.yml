@@ -1,0 +1,26 @@
+name: CI
+
+# 门禁：PR 和默认分支的推送自动跑构建 + 全部测试。不签名、不碰任何 secrets，
+# fork 来的 PR 也能跑（GitHub 本来就不给 fork 的 PR 发 secrets，这里也用不上）。
+on:
+  pull_request:
+  push:
+    branches: [feat/sunlogin-port]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 构建与测试
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: scripts/snug check（swift build + swift test）
+        run: ./scripts/snug check
