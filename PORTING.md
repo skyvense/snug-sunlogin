@@ -81,6 +81,25 @@ G27M7Pro 横置（2560×1440@160，HDR）。发现报告确认：手机屏成功
    按原版 UU 的 91 点扣减算出的 540×950；机主纠正向日葵是全屏显示、工具栏悬浮覆盖，
    已把扣减改为 0、比例上限提到 2.25，默认屏变为 540×1173（17 Pro Max 的完整比例），待复测。
 
+## GitHub Actions 发版
+
+两个 workflow（`.github/workflows/`，runner 用 `macos-26`，和本机 macOS 26 工具链同代）：
+
+- `ci.yml`：PR 和默认分支推送时跑 `scripts/snug check`（构建全部产物 + 全部测试）。不签名、不用 secrets，fork 的 PR 也能跑。
+- `release.yml`：推 `v<版本>` 标签触发（也可在 Actions 页手动选已有标签重跑）。绑 `release` Environment：把 Developer ID 证书导入临时钥匙串 → 用 App Store Connect API key 存公证档案 → `scripts/snug dist` → 把 dmg 和 `.sha256` 挂到同名 GitHub Release。第一步先核对标签与 `VERSION` 一致，对不上直接拦下；Release 已存在时改为覆盖上传附件。
+
+一次性设置（仓库 Settings，只做一次）：
+
+1. **Environments** → 新建 `release` → 勾 **Required reviewers**（选自己）：每次发版要先人工批准，任务才碰得到下面的 secrets。
+2. 在 `release` Environment 的 **secrets** 里加五个（不要写进仓库文件，也不要放普通变量）：
+   - `DEVELOPER_ID_P12_BASE64`：钥匙串访问「我的证书」里选中 Developer ID Application 那张证书、连私钥导出 `.p12`，再 `base64 -i cert.p12 -o cert.b64`，把文本贴进来；
+   - `DEVELOPER_ID_P12_PASSWORD`：导出 `.p12` 时设的密码；
+   - `ASC_API_KEY_P8_BASE64`：App Store Connect API key 的 `.p8` 文件的 base64；
+   - `ASC_API_KEY_ID`、`ASC_API_ISSUER_ID`：该 key 的 Key ID 与 Issuer ID（App Store Connect → 用户和访问 → 集成）。
+3. 签名证书是公司（Oray）的：`.p12` 和 `.p8` 谁拿到都能冒充公司签名，只放这一个 Environment，不另存仓库、网盘或聊天记录。
+
+发版流程：改 `VERSION` 并提交 → `git tag -a v<版本> -m "…"` 并推送标签 → 在 Actions 里批准 `release` 环境 → 跑完到 Releases 页核对 dmg 能正常下载、双击打开不被 Gatekeeper 拦。应用内更新仍走原来的更新源，GitHub 这条只管下载包。
+
 ## 许可证与致谢
 
 沿用上游 MIT 许可证（见 `LICENSE`），版权归原作者 AoyamaShou 与 zephyr4123 所有。
