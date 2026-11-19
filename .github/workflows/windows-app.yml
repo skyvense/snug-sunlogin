@@ -1,0 +1,45 @@
+name: Windows App (Rust)
+
+# 本机（Linux）编不了 Windows 程序，靠这个 workflow 在 GitHub 的 Windows runner 上
+# 构建并产出可下载的 exe。只构建、不签名、不发版。
+on:
+  push:
+    branches: [feat/windows-app]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows-app.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build (release, static CRT)
+        working-directory: windows
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Collect artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item windows/target/x86_64-pc-windows-msvc/release/SnugWindows.exe dist/
+          Copy-Item windows/scripts/install-vdd.ps1 dist/
+          Copy-Item windows/SPIKE.md dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SnugSunlogin-Windows-Rust
+          path: dist/
+          if-no-files-found: error
