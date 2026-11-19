@@ -8,22 +8,22 @@ struct ScreenFitTests {
     private let baseArea = CGSize(width: 540, height: 1120)
     private let fit = ScreenFit.standard
 
-    @Test("没选过手机（iPhone 17 Pro Max）：全屏比例 540×1173，档位 540 到 1080、每 10 点一档、比例都一样")
+    @Test("没选过手机（iPhone 17 Pro Max）：全屏比例 540×1173，尺寸吸附到 8 的倍数（544×1176），档位 540 到 1080、每 10 点一档、比例都一样")
     func standard() {
-        #expect(fit.size(width: 540) == CGSize(width: 540, height: 1173))
-        #expect(fit.size(width: 1080) == CGSize(width: 1080, height: 2347))
+        #expect(fit.size(width: 540) == CGSize(width: 544, height: 1176))
+        #expect(fit.size(width: 1080) == CGSize(width: 1080, height: 2344))
         #expect(fit.widths.first == 540)
         #expect(fit.widths.last == 1080)
         #expect(zip(fit.widths, fit.widths.dropFirst()).allSatisfy { $1 - $0 == 10 })
         for width in fit.widths {
             let size = fit.size(width: width)
-            #expect(abs(size.height / size.width - 1173.0 / 540) < 0.002)
+            #expect(abs(size.height / size.width - 1173.0 / 540) < 0.015)
         }
     }
 
     @Test("像素上限框住所有比例：最宽一档 × 最长比例的 2 倍")
     func maxPixels() {
-        #expect(ScreenFit.maxPixels == CGSize(width: 2160, height: 4860))
+        #expect(ScreenFit.maxPixels == CGSize(width: 2160, height: 4864))
         let longest = ScreenFit(ratio: 2.25)
         #expect(longest.size(width: 1080).height * 2 == ScreenFit.maxPixels.height)
     }
@@ -34,7 +34,7 @@ struct ScreenFitTests {
         let android = ScreenFit(phone: PhoneScreen(width: 1080, height: 2400))
         #expect(abs(android.ratio - 2400.0 / 1080) < 1e-9)
         #expect(android.baseWidth == 540)
-        #expect(android.size(width: 540) == CGSize(width: 540, height: 1200))
+        #expect(android.size(width: 540) == CGSize(width: 544, height: 1200))
         // 只看比例：自己填 9×20 和 1080×2400 一样
         #expect(ScreenFit(phone: PhoneScreen(width: 9, height: 20)) == android)
     }
@@ -56,7 +56,7 @@ struct ScreenFitTests {
         #expect(fold.size(width: fold.baseWidth) == CGSize(width: 800, height: 800))
         let tall = ScreenFit(phone: PhoneScreen(width: 9, height: 30))
         #expect(tall.ratio == 2.25)
-        #expect(tall.size(width: 540) == CGSize(width: 540, height: 1215))
+        #expect(tall.size(width: 540) == CGSize(width: 544, height: 1216))
     }
 
     @Test("任何比例的每一档都过 2 倍门槛（宽 ≥ 540、高 ≥ 800），也都在像素上限里")

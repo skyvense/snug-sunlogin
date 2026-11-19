@@ -21,7 +21,8 @@ public struct ScreenFit: Equatable, Sendable, CustomStringConvertible {
     /// 高宽比的范围：最方到正方形（折叠屏内屏比这还方），最长到 2.25（现代手机全屏比例：19.5:9 约 2.17、20:9 约 2.22；像素上限按它定）
     public static let ratioRange: ClosedRange<Double> = 1...2.25
     /// 像素上限：最宽一档按最长比例的 2 倍，所有比例共用。换比例时屏幕身份不变、不多出 ICC 文件（实测）
-    public static let maxPixels = CGSize(width: maxWidth * 2, height: Int(Double(maxWidth) * ratioRange.upperBound) * 2)
+    /// 高度按 size() 的吸附口径取（2430 点吸附到 2432），不然最长比例那一档的像素高会超出上限、模式登记不进去
+    public static let maxPixels = CGSize(width: maxWidth * 2, height: Int((Double(maxWidth) * ratioRange.upperBound / 8).rounded() * 8) * 2)
     /// 画面上下各让出的高度（点）。向日葵 全屏显示、工具栏浮在画面上不占高度，所以是 0
     /// （2026-11-18 实机纠正）。原版 UU 客户端上下有黑边和工具栏才要扣，那是 UU 的界面
     static let sunloginInset: Double = 0
@@ -56,8 +57,14 @@ public struct ScreenFit: Equatable, Sendable, CustomStringConvertible {
     }
 
     /// 这一档的逻辑尺寸（点）
+    /// 实验（抓屏卡顿 A/B）：宽高都吸附到 8 的倍数，2 倍下像素就是 16 的倍数（540×1173 → 544×1176 点 = 1088×2352 像素）。
+    /// 依据：手机远控物理屏（3840×2160、2560×1440、1440×2560）两轴都能被 16 整除、串流流畅；虚拟屏原先
+    /// 1080×2346 两轴都不整除，且 Windows 主控看虚拟屏流畅、只有手机会话卡——怀疑手机硬解对非对齐尺寸走慢路径。
+    /// 像素总量几乎不变（2.53MP → 2.56MP），单独验证「对齐」这一个变量。
     public func size(width: Int) -> CGSize {
-        CGSize(width: CGFloat(width), height: (Double(width) * ratio).rounded())
+        let w = (Double(width) / 8).rounded() * 8
+        let h = (Double(width) * ratio / 8).rounded() * 8
+        return CGSize(width: w, height: h)
     }
 
     /// 日志里的样子：基准尺寸
