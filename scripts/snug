@@ -37,7 +37,7 @@ usage() {
   check     构建全部产物，跑全部测试（门禁）
   app       打 build/Snug.app 并签名：有 Developer ID 证书就用它，没有就 ad-hoc
   install   打 App，装进「应用程序」并打开（先正常退出正在跑的 Snug，窗口会先放回原处）
-  dist      打可分发的安装包 dist/<版本>/Snug-<版本>.dmg：Developer ID 签名，App 和 dmg 各自公证、钉票据；
+  dist      打可分发的安装包 dist/<版本>/Snug-Sunlogin-<版本>.dmg：Developer ID 签名，App 和 dmg 各自公证、钉票据；
             再把公证过的 App 打成应用内更新用的 Snug-<版本>.pack
   ship      发版：把关 → check → dist → 写 update.json（更新日志取自标签说明）→ GitHub Release 草稿、传包 →
             公开 → 传国内源 → 两边都从下载地址核对
@@ -238,7 +238,7 @@ make_dmg() {
 # MARK: 国内源（腾讯云 COS + CDN）
 #
 # 桶私有，只让 CDN 读；都在 snug/ 下：
-#   v<版本>/Snug-<版本>.dmg、.sha256    发过就不改，缓存一年
+#   v<版本>/Snug-Sunlogin-<版本>.dmg、.sha256    发过就不改，缓存一年
 #   v<版本>/Snug-<版本>.pack、update.json 应用内更新：按块打的包和说明它的 update.json（Sources/SnugRelease）
 #   latest/Snug.dmg                     固定的「最新版」地址（README、官网用）：发版时换成新包，不往旧版本换；
 #                                       缓存 5 分钟，下载下来的文件名带版本号
@@ -367,9 +367,9 @@ verify_download() {
   print -- "下载地址核对过：$url"
 }
 
-# <目录> 里的 Snug-<版本>.dmg 和 .sha256 传到国内源、从下载地址核对，再把「最新版」地址换成它
+# <目录> 里的 Snug-Sunlogin-<版本>.dmg 和 .sha256 传到国内源、从下载地址核对，再把「最新版」地址换成它
 publish_cos() {
-  local version=$1 dir=$2 name="Snug-$1.dmg"
+  local version=$1 dir=$2 name="Snug-Sunlogin-$1.dmg"
   local sum; sum="$(cut -d ' ' -f 1 < "$dir/$name.sha256")"
   step "传到国内源 $DOWNLOAD_BASE/v$version/"
   cos put "$dir/$name" "$COS_PREFIX/v$version/$name" "$IMMUTABLE"
@@ -441,7 +441,7 @@ cmd_dist() {
   require_distribution_setup
   keep_awake
   local version; version="$(read_version)"
-  local out="dist/$version" dmg="dist/$version/Snug-$version.dmg"
+  local out="dist/$version" dmg="dist/$version/Snug-Sunlogin-$version.dmg"
   local commit; commit="$(git rev-parse HEAD)"
   [[ -z "$(git status --porcelain)" ]] || { commit="$commit-dirty"; warn "工作区有没提交的改动：这个包只能自己用，ship 不会用它"; }
   rm -rf "$out"
@@ -480,10 +480,10 @@ cmd_dist() {
 # 本地的包能不能直接拿去发：出自 HEAD、工作区当时干净、校验值对得上
 dist_is_current() {
   local version=$1 out="dist/$1"
-  [[ -f $out/BUILT_FROM && -f $out/Snug-$version.dmg && -f $out/Snug-$version.dmg.sha256 ]] || return 1
+  [[ -f $out/BUILT_FROM && -f $out/Snug-Sunlogin-$version.dmg && -f $out/Snug-Sunlogin-$version.dmg.sha256 ]] || return 1
   [[ -f $out/Snug-$version.pack && -f $out/update-package.json ]] || return 1
   [[ "$(cat "$out/BUILT_FROM")" == "$(git rev-parse HEAD)" ]] || return 1
-  (cd "$out" && shasum -a 256 -c -s "Snug-$version.dmg.sha256")
+  (cd "$out" && shasum -a 256 -c -s "Snug-Sunlogin-$version.dmg.sha256")
 }
 
 check_github_account() {
@@ -496,7 +496,7 @@ check_github_account() {
 
 cmd_ship() {
   local version; version="$(read_version)"
-  local tag="v$version" dmg_name="Snug-$version.dmg"
+  local tag="v$version" dmg_name="Snug-Sunlogin-$version.dmg"
 
   step "把关"
   [[ -z "$(git status --porcelain)" ]] || die "工作区有没提交的改动：发出去的会和标签对不上"
@@ -554,7 +554,7 @@ cmd_ship() {
 cmd_mirror() {
   local version="${1#v}"
   [[ $version =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || die "用法：scripts/snug mirror <版本>，比如 scripts/snug mirror 2.0.0"
-  local tag="v$version" name="Snug-$version.dmg"
+  local tag="v$version" name="Snug-Sunlogin-$version.dmg"
   check_github_account
   require_cos_setup
   [[ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)" == "false" ]] \

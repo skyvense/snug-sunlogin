@@ -100,10 +100,10 @@ jobs:
           set -euo pipefail
           version="$(tr -d '[:space:]' < VERSION)"
           gh release create "$TAG" \
-            "dist/$version/Snug-$version.dmg" "dist/$version/Snug-$version.dmg.sha256" \
+            "dist/$version/Snug-Sunlogin-$version.dmg" "dist/$version/Snug-Sunlogin-$version.dmg.sha256" \
             --title "Snug for Sunlogin $TAG" --generate-notes \
           || gh release upload "$TAG" \
-            "dist/$version/Snug-$version.dmg" "dist/$version/Snug-$version.dmg.sha256" --clobber
+            "dist/$version/Snug-Sunlogin-$version.dmg" "dist/$version/Snug-Sunlogin-$version.dmg.sha256" --clobber
 
       - name: 清理临时钥匙串
         if: always()

@@ -26,7 +26,7 @@ Snug · 向日葵版是一款 macOS 菜单栏应用：当你用向日葵手机 A
 
 ## 下载与安装
 
-1. 从 [Releases](https://github.com/skyvense/snug-sunlogin/releases) 页面下载最新版 `Snug-<版本>.dmg`
+1. 从 [Releases](https://github.com/skyvense/snug-sunlogin/releases) 页面下载最新版 `Snug-Sunlogin-<版本>.dmg`
 2. 打开 DMG，把 Snug 拖进「应用程序」
 3. 首次打开时按欢迎页授予「辅助功能」权限，之后常驻菜单栏
 4. 手机用向日葵连入这台 Mac，在向日葵的屏幕列表里选择「Snug 手机屏」即可
