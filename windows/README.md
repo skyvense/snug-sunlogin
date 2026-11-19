@@ -1,0 +1,40 @@
+# Snug for Sunlogin — Windows 版（spike / v0.1，Rust）
+
+macOS 版的 Windows 对照版。同一仓库、双平台：macOS 代码仍在仓库根目录
+（`Sources/`），Windows 代码全部在 `windows/` 下，版本线分开。
+
+## 本分支的范围（机主 2026-11-19 定）
+
+**只做 spike：验证向日葵手机端能不能用一块 Windows 虚拟屏。手势翻译不做。**
+
+- 虚拟屏：复用开源的 Virtual Display Driver（VDD，已签名，winget 安装），不自研驱动
+- 应用本体（`SnugWindows.exe`，Rust + Win32）：
+  - 枚举显示器，找到 VDD 虚拟屏
+  - 「创建手机屏」：把 1080×2346@60 写进 VDD 配置（`C:\VirtualDisplayDriver\vdd_settings.xml`，
+    只动 monitors/count 与手机屏这一条分辨率，原文备份 `.snug-pristine.bak`）、
+    重启驱动设备、把虚拟屏设成该模式（200% 缩放时逻辑尺寸即 540×1173，与 mac 版一致）
+  - 「移除手机屏」：按状态记录原样恢复配置
+  - 「测试窗口」：铺满虚拟屏的动/静对照画面（大字帧号），专为对照 mac 版串流卡顿
+  - 全程日志：界面日志框 + `%LOCALAPPDATA%\SnugWindows\snug-windows.log`
+
+## 怎么跑
+
+普通用户不用装 Rust：去 GitHub Actions 的 `Windows App (Rust)` 工作流下载
+`SnugSunlogin-Windows-Rust` 产物（exe + `install-vdd.ps1` + `SPIKE.md`），
+按 `SPIKE.md` 的步骤测。
+
+本地构建（需要 Rust 工具链）：
+
+```powershell
+cd windows
+cargo build --release --target x86_64-pc-windows-msvc
+# 产物：target\x86_64-pc-windows-msvc\release\SnugWindows.exe
+```
+
+exe 带 requireAdministrator 清单（改配置、重启设备需要），双击会弹 UAC，属预期。
+
+## 说明
+
+- 本应用不调用向日葵的任何 API：虚拟屏对向日葵被控端就是一块普通显示器，
+  手机端选屏、串流都走它自己的链路——这正是 spike 要验证的。
+- 同一需求曾有 C#（WPF / WinForms）两稿，均已弃用：机主 2026-11-19 定 Windows 版用 Rust 重写。
