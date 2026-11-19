@@ -18,7 +18,7 @@ Snug 不接入远程软件的任何接口，只观察它在本机留下的三路
 | :- | :--- | :--- | :--- | :--- |
 | 1 | 身份常量 `Sunlogin.swift` | `com.netease.uuremote` / 进程 `UURemoteServer` | `com.oray.sunlogin.macclient` / 推流进程 `AweSun_Desktop` | ✅ 已实机核对（2026-11-18）：推流日志全部来自 AweSun_Desktop（`Contents/Helpers/AweSun_Desktop.app`）；覆盖窗口是主程序 AweSun 放的，单独认 `overlayWindowOwner` |
 | 2 | 推流判定 `CaptureLogParser` | 按进程名过滤系统日志里的 ScreenCaptureKit / VideoToolbox 事件 | 关键字不变，只换进程名（跟随 #1 常量） | ✅ 已实机核对：向日葵确实走 ScreenCaptureKit，25 秒采样与 10 分钟回看都抓到了 AweSun_Desktop 的 `SCDisplay/SCStream` 事件 |
-| 3 | 手势接管 `SunloginEventSource` | 只接管来源进程名为 `UURemoteServer` 的注入事件 | 跟随 #1 常量（AweSun_Desktop） | 待实机核对：注入输入是否也由 AweSun_Desktop 发出（真机上试单指滑动是否被翻译即可判） |
+| 3 | 手势接管 `SunloginEventSource` | 只接管来源进程名为 `UURemoteServer` 的注入事件 | 跟随 #1 常量（AweSun_Desktop） | ✅ 已实机核对（2026-11-19）：诊断日志确认注入事件全部来自 AweSun_Desktop，点击（按下扣住→抬起补发）与单指拖动（译成滚动）均按预期工作。遗留观察：2026-11-18 曾出现一次点击全部失效，当时日志仅有的异常是撤屏/退出重排窗口时监听两次被系统以「回调超时」停用（另有主线程卡 2.2s、向日葵会话自身断连重连两次）；无逐事件记录，未能实锤，诊断日志（每次监听前 150 条）已留在代码里，再犯可取证 |
 | 4 | 覆盖窗口 `SunloginApp.overlayVisible` | owner 为 `UURemoteServer` 的在屏窗口 | owner 为主程序 `AweSun` 且图层 ≥ 100 的在屏窗口（实测被控悬浮窗图层 1001） | ⚠️ 部分核对：被控时存在；未被控时是否也在屏待基线报告确认，在的话这一路会误报 |
 | 5 | 控制端表格 `ControllerTable` | 用辅助功能读 UU 主窗口「本机被控中」列表，区分手机/电脑控制端 | **未适配**：解析的仍是 UU 的界面结构，向日葵界面不同，预计读不到 | 读不到时按上游既有降级：未知控制端等 2 秒按手机处理。副作用：电脑连电脑的向日葵会话也会升起手机屏（v0.1 可接受） |
 | 6 | 手机屏比例扣减 `ScreenFit.sunloginInset` | 上下各扣 91 点（UU 手机端工具栏实测） | **0（不扣）** | ✅ 已定版（2026-11-18 机主实机纠正）：向日葵手机端全屏显示、工具栏是浮在画面上的覆盖层、不占高度，虚拟屏直接用手机屏幕的完整比例；连带把比例上限从 2 提到 2.25（现代手机全屏比例约 2.17–2.22），默认屏由 540×950 变为 540×1173，相关单测已按新数重算（待 Mac 上 `scripts/snug check` 跑绿确认） |
