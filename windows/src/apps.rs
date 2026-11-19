@@ -80,6 +80,18 @@ extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
             .last()
             .unwrap_or("")
             .to_string();
+        // 系统外壳的常驻窗口不是用户 App，不进资源库（实测日志里混进了输入体验宿主）
+        if matches!(
+            app_name.as_str(),
+            "TextInputHost"
+                | "ShellExperienceHost"
+                | "StartMenuExperienceHost"
+                | "SearchHost"
+                | "LockApp"
+                | "PeopleExperienceHost"
+        ) {
+            return BOOL(1);
+        }
         out.push(RunningWindow {
             hwnd: hwnd.0 as isize,
             title,

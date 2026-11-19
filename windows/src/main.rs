@@ -321,7 +321,11 @@ fn create_phone_screen() {
         return;
     }
     vdd::save_state(&state);
-    ui_log("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（原文件备份为 .snug-pristine.bak）");
+    if created {
+        ui_log("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（新建文件，无原文件可备份）");
+    } else {
+        ui_log("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（原文件备份为 .snug-pristine.bak）");
+    }
 
     if !restart_vdd_device() {
         return;

@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 # 装 Virtual Display Driver（VDD）：spike 的前置步骤，只需跑一次。
 # 失败就直接报错退出，不静默跳过；每一步的判定都打印出来。
 $ErrorActionPreference = 'Stop'
