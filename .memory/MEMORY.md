@@ -6,6 +6,7 @@
 - [项目定位](project-positioning.md) — 承接的自有项目，保留原作者版权与致谢；2.0.0 已发布，本地数据格式变更要带迁移
 - [产品](project-product.md) — 目标与已拍板的形态：可选竖屏手机屏、默认同原版 UU、App 资源库、按窗口换档、按机型定比例、可选截图（入口在指示条）；设主屏改成可选（默认不改）；否掉横竖切换、默认进手机屏；边界扩到电脑控制端
 - [手机屏实测坑](project-phone-screen.md) — UU 事件形态与选屏推流规律（新连接总从主屏开始）、真机自测与只从访达重开正式版、ColorSync、换档实测、App 资源库边界
+- [向日葵移植进度（fork）](project-sunlogin-port.md) — 本 fork 的实机结论与待办：身份/全屏比例定版、旋转还原、手势点击失效排查、Oray 公司证书与 GitHub Actions 发版；上游的环境记忆不适用于本 fork
 - [发版](project-release.md) — 只走 scripts/snug；个人 Developer ID（29898YBGWD）公证；gh 绑定 zephyr4123 并写明 -R；版本号与更新日志口径；发版后不替主人装
 - [国内源与 README](project-domestic-mirror.md) — dl.zephyrxiang.com/snug/ 放安装包与 README 媒体；看下载量；README 结构、截图规格、待换的演示动图；证书 2027-01-12 到期
 - [演示录制（进行中）](project-demo-recording.md) — 三块屏原画并排，正式素材和粗剪已就绪；全在 footage/（绝不进 git），主人说交接时才交给 kineto
