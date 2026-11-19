@@ -59,17 +59,22 @@ enum TouchEvents {
 
 /// 认 AweSun 注入的事件：按来源进程号查可执行文件名，按进程号缓存。本机的触控板、鼠标不是它发的，一律不认
 struct SunloginEventSource {
-    private var known: [pid_t: Bool] = [:]
+    private var known: [pid_t: String] = [:]
 
-    mutating func sent(_ event: CGEvent) -> Bool {
+    /// 事件来源进程的可执行文件名；进程号查不到（本机硬件输入的来源进程号多半是 0）时返回空串
+    mutating func sourceName(_ event: CGEvent) -> String {
         let pid = pid_t(event.getIntegerValueField(.eventSourceUnixProcessID))
-        guard pid > 0 else { return false }
-        if let match = known[pid] { return match }
+        guard pid > 0 else { return "" }
+        if let name = known[pid] { return name }
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         let length = Int(proc_pidpath(pid, &buffer, UInt32(buffer.count)))
         let path = length > 0 ? String(decoding: buffer.prefix(length).map { UInt8(bitPattern: $0) }, as: UTF8.self) : ""
-        let match = (path as NSString).lastPathComponent == Sunlogin.serverProcess
-        known[pid] = match
-        return match
+        let name = (path as NSString).lastPathComponent
+        known[pid] = name
+        return name
+    }
+
+    mutating func sent(_ event: CGEvent) -> Bool {
+        sourceName(event) == Sunlogin.serverProcess
     }
 }

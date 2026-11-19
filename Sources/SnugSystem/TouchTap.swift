@@ -64,6 +64,8 @@ private final class TapSession: @unchecked Sendable {
     private var heldPress: CGEvent?
     private var coastTimer: CFRunLoopTimer?
     private var uu = SunloginEventSource()
+    /// 手势诊断已写的条数：只记每次监听的前若干条，防日志被拖动事件刷满
+    private var diagCount = 0
 
     init(region: OSAllocatedUnfairLock<TouchRegion?>, closeWindow: @escaping @Sendable (UInt32) -> Void) {
         self.region = region
@@ -124,7 +126,16 @@ private final class TapSession: @unchecked Sendable {
             Log.warn("手势翻译的事件监听被系统停用（\(type == .tapDisabledByTimeout ? "回调超时" : "用户输入")），已重新开启")
             return pass
         }
-        guard let kind = TouchEvents.kind(of: type), !TouchEvents.isReplay(event), uu.sent(event) else { return pass }
+        guard let kind = TouchEvents.kind(of: type), !TouchEvents.isReplay(event) else { return pass }
+        let pid = pid_t(event.getIntegerValueField(.eventSourceUnixProcessID))
+        let source = uu.sourceName(event)
+        guard source == Sunlogin.serverProcess else {
+            // 诊断：手里还扣着一下按下时来了来源对不上的抬起——按下被吞、抬起没配上对，点击就成不了
+            if kind == .release, heldPress != nil {
+                diagnose("抬起来源对不上：pid \(pid) 进程「\(source)」；手里还扣着一下按下，这次点击补发不出来")
+            }
+            return pass
+        }
 
         let input = TouchInput(kind, at: event.location, time: ProcessInfo.processInfo.systemUptime)
         let region = region.withLock { $0 }
@@ -133,7 +144,33 @@ private final class TapSession: @unchecked Sendable {
         response.commands.forEach { perform($0, current: event, region: region) }
         if kind == .release { heldPress = nil }
         if translator.isCoasting { startCoasting() }
+        diagnose("\(Self.name(of: kind)) pid \(pid) 位置 \(NSStringFromPoint(event.location)) 区域 \(region.map { NSStringFromRect($0.frame) } ?? "无") → \(response.passOriginal ? "放行" : "吞掉")，命令 [\(response.commands.map(Self.name(of:)).joined(separator: "、"))]")
         return response.passOriginal ? pass : nil
+    }
+
+    /// 手势诊断：接管的每一下和配不上对的抬起都记一行（每次监听最多 150 行），查点击失效时看事件到底断在哪一环
+    private func diagnose(_ message: String) {
+        guard diagCount < 150 else { return }
+        diagCount += 1
+        Log.info("手势诊断[\(diagCount)] \(message)")
+    }
+
+    private static func name(of kind: TouchInput.Kind) -> String {
+        switch kind {
+        case .press: "按下"
+        case .drag: "拖动"
+        case .release: "抬起"
+        }
+    }
+
+    private static func name(of command: TouchCommand) -> String {
+        switch command {
+        case .replayPress: "补发按下"
+        case .replayCurrent: "补发当前"
+        case .rightClick: "右键"
+        case .scroll: "滚动"
+        case .closeWindow: "关窗"
+        }
     }
 
     private func perform(_ command: TouchCommand, current: CGEvent, region: TouchRegion?) {
