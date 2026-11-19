@@ -1,0 +1,113 @@
+name: Release
+
+# 发版：推 v<版本> 标签触发。用 release Environment 里的 secrets 把 Developer ID
+# 证书导入临时钥匙串、存好公证档案，跑 scripts/snug dist（签名 + 两次公证），
+# 把 dmg 和校验文件挂到同名 GitHub Release。
+#
+# 安全边界：
+# - 签名材料只存在于 release Environment 的 secrets 中；本 workflow 绑了
+#   environment: release，在 Environment 里配 Required reviewers 后，
+#   每次发版要先人工批准才碰得到 secrets。
+# - fork 的 PR、普通 CI 都拿不到这些 secrets，也触发不了这个 workflow。
+# 一次性设置（Environment 与五个 secrets）见 PORTING.md「GitHub Actions 发版」。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的标签（如 v2.5.1），必须已存在"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  dist:
+    name: 签名打包并发布
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: release
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      # 公证档案名只是个名字，不是秘密；和下面 store-credentials 存的对应即可
+      MAC_NOTARY_PROFILE: ci-notary
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: 标签和 VERSION 对齐
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ "v$version" != "$TAG" ]; then
+            echo "❌ 标签 $TAG 与 VERSION 文件里的 $version 对不上，先改 VERSION 或改标签"
+            exit 1
+          fi
+
+      - name: 导入 Developer ID 证书到临时钥匙串
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/snug-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          # 搜索列表只留临时钥匙串：scripts/snug 按「唯一一张 Developer ID」自动选证书，
+          # 这样选到的必然是刚导入的这张，不会串到 runner 自带的证书上
+          security list-keychains -d user -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          echo "KEYCHAIN_PATH=$KEYCHAIN" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning | grep "Developer ID Application" || {
+            echo "❌ 导入的 .p12 里没有 Developer ID Application 证书（导出时要连私钥一起导）"
+            exit 1
+          }
+
+      - name: 存公证档案（App Store Connect API key）
+        env:
+          P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          echo "$P8_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool store-credentials "$MAC_NOTARY_PROFILE" \
+            --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$KEY_ID" --issuer "$ISSUER_ID"
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: scripts/snug dist（签名 + 公证 + 打 dmg）
+        run: ./scripts/snug dist
+
+      - name: 挂到 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          gh release create "$TAG" \
+            "dist/$version/Snug-$version.dmg" "dist/$version/Snug-$version.dmg.sha256" \
+            --title "Snug for Sunlogin $TAG" --generate-notes \
+          || gh release upload "$TAG" \
+            "dist/$version/Snug-$version.dmg" "dist/$version/Snug-$version.dmg.sha256" --clobber
+
+      - name: 清理临时钥匙串
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
