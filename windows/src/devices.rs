@@ -56,11 +56,18 @@ pub fn display_adapters() -> Result<Vec<PnpDevice>, String> {
     Ok(devices)
 }
 
-/// VDD 的适配器在设备管理器里叫 Virtual Display Driver（子串匹配，兼容版本差异）。
+/// VDD 的适配器在设备管理器里一般叫 Virtual Display Driver；不同版本命名可能不同，
+/// 名字与实例 ID 都查（IddSample 系的实例 ID 带 IDDSAMPLE），大小写不敏感。
 pub fn find_vdd(devices: &[PnpDevice]) -> Option<&PnpDevice> {
-    devices
-        .iter()
-        .find(|d| d.friendly_name.contains("Virtual Display"))
+    devices.iter().find(|d| {
+        let name = d.friendly_name.to_lowercase();
+        let id = d.instance_id.to_lowercase();
+        name.contains("virtual display")
+            || name.contains("virtualdisplaydriver")
+            || name.contains("iddsample")
+            || id.contains("iddsample")
+            || id.contains("idd_sample")
+    })
 }
 
 /// 重启设备让 VDD 重新读配置。有的版本上 restart 不被支持，退而求其次 disable 再 enable。

@@ -258,6 +258,54 @@ fn refresh_displays() {
 }
 
 /// 重启 VDD 设备（找设备 → pnputil 重启）。返回是否找到了设备。
+/// 找不到 VDD 适配器时把现场打全，让下一次贴回来的日志能直接定性：
+/// 是驱动根本没装、装了但设备名不一样、还是包已装但设备没建出来。
+fn log_no_vdd_diagnostics(list: &[devices::PnpDevice]) {
+    ui_log(&format!("诊断：PnP 显示类设备共 {} 个：", list.len()));
+    for d in list {
+        ui_log(&format!(
+            "  {} | {} | 状态 {}",
+            d.friendly_name, d.instance_id, d.status
+        ));
+    }
+    match std::fs::read_dir("C:\\VirtualDisplayDriver") {
+        Ok(rd) => {
+            let names: Vec<String> = rd
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            ui_log(&format!(
+                "诊断：C:\\VirtualDisplayDriver 目录内容：{}",
+                if names.is_empty() {
+                    "（空）".to_string()
+                } else {
+                    names.join("、")
+                }
+            ));
+        }
+        Err(e) => ui_log(&format!("诊断：读不了 C:\\VirtualDisplayDriver 目录：{e}")),
+    }
+    let (exit, output) = devices::run(
+        "winget",
+        &[
+            "list",
+            "--id",
+            "VirtualDrivers.Virtual-Display-Driver",
+            "--accept-source-agreements",
+        ],
+    );
+    if exit == 0 {
+        let tail: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
+        for line in tail.iter().rev().take(2).rev() {
+            ui_log(&format!("诊断：winget list：{line}"));
+        }
+    } else {
+        ui_log(&format!(
+            "诊断：winget list 退出码 {exit}（多半是 winget 里没这个包的安装记录）"
+        ));
+    }
+}
+
 fn restart_vdd_device() -> bool {
     match devices::display_adapters() {
         Ok(list) => match devices::find_vdd(&list) {
@@ -278,6 +326,7 @@ fn restart_vdd_device() -> bool {
             }
             None => {
                 ui_log("没找到 VDD 显示适配器（驱动没装？）——配置已写好，装好驱动后重启设备即可生效");
+                log_no_vdd_diagnostics(&list);
                 false
             }
         },
