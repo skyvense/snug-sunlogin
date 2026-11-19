@@ -285,6 +285,18 @@ fn log_no_vdd_diagnostics(list: &[devices::PnpDevice]) {
         }
         Err(e) => ui_log(&format!("诊断：读不了 C:\\VirtualDisplayDriver 目录：{e}")),
     }
+    match devices::problem_devices() {
+        Ok(problems) => {
+            ui_log(&format!("诊断：状态异常的 PnP 设备共 {} 个：", problems.len()));
+            for d in problems.iter().take(10) {
+                ui_log(&format!(
+                    "  {} | {} | 状态 {}",
+                    d.friendly_name, d.instance_id, d.status
+                ));
+            }
+        }
+        Err(e) => ui_log(&format!("诊断：{e}")),
+    }
     let (exit, output) = devices::run(
         "winget",
         &[

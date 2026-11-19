@@ -56,6 +56,34 @@ pub fn display_adapters() -> Result<Vec<PnpDevice>, String> {
     Ok(devices)
 }
 
+/// 枚举所有「有问题」的 PnP 设备（任意类别，状态不是 OK 的）：
+/// 驱动装了但加载失败的设备（签名被拒、内存完整性拦截等）会在这里现形，带状态码。
+pub fn problem_devices() -> Result<Vec<PnpDevice>, String> {
+    let script = "Get-PnpDevice -PresentOnly | Where-Object { $_.Status -ne 'OK' } | ForEach-Object { $_.FriendlyName + '|' + $_.InstanceId + '|' + $_.Status }";
+    let (exit, output) = run(
+        "powershell.exe",
+        &["-NoProfile", "-NonInteractive", "-Command", script],
+    );
+    if exit != 0 {
+        return Err(format!(
+            "Get-PnpDevice（问题设备）失败（退出码 {exit}）：{}",
+            output.trim()
+        ));
+    }
+    let mut devices = Vec::new();
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() == 3 {
+            devices.push(PnpDevice {
+                friendly_name: parts[0].trim().to_string(),
+                instance_id: parts[1].trim().to_string(),
+                status: parts[2].trim().to_string(),
+            });
+        }
+    }
+    Ok(devices)
+}
+
 /// VDD 的适配器在设备管理器里一般叫 Virtual Display Driver；不同版本命名可能不同，
 /// 名字与实例 ID 都查（IddSample 系的实例 ID 带 IDDSAMPLE），大小写不敏感。
 pub fn find_vdd(devices: &[PnpDevice]) -> Option<&PnpDevice> {
