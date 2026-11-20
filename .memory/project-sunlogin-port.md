@@ -60,3 +60,7 @@ metadata:
 ### 2026-11-20 17:1x 虚拟屏缩放 + 启动器图标/多窗口（机主要求）
 - 缩放：新模块 scale.rs 走 CCD 未公开 GET/SET_SOURCE_DPI_SCALE（type -3/-4，Firefox/Wine/SetDPI 同款）；阶梯 12 档，相对步数以推荐档为 0 点；GET 后三 i32 字段序两说，用 min<=cur<=max 不变式判定（b==c 时两读法等价，不变式可精确区分）；当前%由该屏 DC 的 LOGPIXELSX 换算，设置后读回验证。建屏就绪后 apply_phone_scale 抬到至少 250%（只升不降），原始步数记 vdd-state 的 scale_rel_before（只记第一次），移除时在禁用设备前先 set_rel 还原。CI 44707938910 绿。未验证：真机上 VDD 屏的推荐档与实际生效幅度，等机主看日志「缩放 X% → 250%」。
 - 启动器：图标放大（行 48→56/行高 88，磁贴 64→88/高 188）；「运行中」改按 App 分组（键=exe 路径退回程序名）：多窗口行尾「N 窗 ▾」展开钮，展开子行缩进小图标逐窗可选（点=全屏该窗）、子行行尾 ✕ 关该窗（WM_CLOSE 后 pump 350ms 重扫列表对账）；单窗口分组行行尾直接 ✕；多窗口分组行无 ✕（关窗在子行）。绘制与命中共用 close_btn_rect/expand_chip_rect。CI 44708156219、44708267916 绿。SPIKE 新增 U7（缩放）、U5 补多窗口/关窗项。
+
+### 2026-11-20 17:2x 合入 main + v2.6.0 双平台发版（机主指令）
+- 合并检查：main 零独有提交、windows 分支领先 53 提交、merge-tree 无冲突 → 快进合并已完成并推送，main CI（44709202550，mac 构建与测试）绿。合并前发现分组提交漏了命中接线两处编辑（滞留工作区），已补提交 015ff30 并验 CI 绿才合并。
+- release.yml 新增 windows-dist 任务：needs dist（等 mac 建好 Release）、不绑 Environment（无签名 secrets、免二次批准），按 windows-app.yml 同款配方构建，zip 内含 SnugWindows.exe + setup-virtual-display.ps1 + windows/README.md，附 .sha256，gh release upload --clobber 挂同一 Release。VERSION 升 2.6.0（a7b762f），注释标签 v2.6.0 已推，Release run 44709754420 处于 waiting——等机主在 Actions 里批准 release Environment；批准后 mac DMG 四件套 + Windows zip 应同挂 v2.6.0 Release，待验。
