@@ -47,16 +47,12 @@ const ID_REFRESH: i32 = 1001;
 const ID_CREATE: i32 = 1002;
 const ID_REMOVE: i32 = 1003;
 const ID_TEST: i32 = 1004;
-const ID_INSTALL: i32 = 1005;
 const ID_LAUNCHER: i32 = 1006;
 const ID_MODEL: i32 = 1007;
 const ID_MODE_AUTO: i32 = 1008;
 const ID_MODE_MANUAL: i32 = 1009;
-const ID_UPDATE: i32 = 1010;
-const ID_GUIDE: i32 = 1011;
-
-/// 启动时发现没装驱动 → 问用户要不要开配置向导
-const WM_GUIDE_PROMPT: u32 = WM_APP + 30;
+/// 启动驱动检测的结果（wparam 1 = 驱动在，0 = 不在 → 直接开向导）
+const WM_DRIVER_CHECKED: u32 = WM_APP + 30;
 
 /// 带 --guide（或误写的 --guild）启动：直接打开配置向导，不等询问
 static GUIDE_REQUESTED: std::sync::atomic::AtomicBool =
@@ -84,14 +80,11 @@ struct MainState {
     btn_remove: HWND,
     btn_test: HWND,
     btn_launcher: HWND,
-    btn_install: HWND,
-    btn_update: HWND,
-    btn_guide: HWND,
+
     icon_box: HWND,
     detail: HWND,
     grp_phone: HWND,
     grp_test: HWND,
-    grp_driver: HWND,
     combo_model: HWND,
     radio_auto: HWND,
     radio_manual: HWND,
@@ -102,7 +95,6 @@ struct MainState {
     screen_auto_owned: bool,
     phone_hint: HWND,
     test_hint: HWND,
-    driver_hint: HWND,
     log_edit: HWND,
     log_text: String,
     displays: Vec<DisplayInfo>,
@@ -340,14 +332,10 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.btn_test,
                 s.btn_launcher,
                 s.test_hint,
-                s.grp_driver,
-                s.btn_install,
                 s.btn_refresh,
-                s.btn_update,
-                s.btn_guide,
-                s.driver_hint,
                 s.log_edit,
                 s.dpi,
+                s.auto_create,
             )
         })
     });
@@ -368,14 +356,10 @@ fn layout_controls(client_w: i32, client_h: i32) {
         b_test,
         b_launcher,
         test_hint,
-        grp_driver,
-        b_install,
         b_refresh,
-        b_update,
-        b_guide,
-        driver_hint,
         log_edit,
         dpi,
+        auto_create,
     )) = items
     else {
         return;
@@ -389,46 +373,64 @@ fn layout_controls(client_w: i32, client_h: i32) {
     move_ctrl(detail, m + sc(50), sc(36), cw - sc(50), sc(20));
     // 显示器列表
     move_ctrl(list, m, sc(64), cw, sc(116));
-    // 「手机屏」组：整宽，四行——创建/移除按钮、型号下拉、自动开关、说明
-    let gy = sc(192);
-    let gh_phone = sc(148);
+    // 列表正下方的操作行：刷新 / 创建 / 删除，只在手动模式出现；
+    // 自动模式下建屏拆屏由主控连入/断开触发，这行整个让掉不占地方
+    let list_bottom = sc(64) + sc(116);
+    let row_h = if auto_create { 0 } else { sc(46) };
+    if auto_create {
+        for b in [b_refresh, b_create, b_remove] {
+            unsafe {
+                let _ = ShowWindow(b, SW_HIDE);
+            }
+        }
+    } else {
+        let bw3 = (cw - sc(16)) / 3;
+        let by = list_bottom + sc(10);
+        move_ctrl(b_refresh, m, by, bw3, sc(36));
+        move_ctrl(b_create, m + bw3 + sc(8), by, bw3, sc(36));
+        move_ctrl(
+            b_remove,
+            m + (bw3 + sc(8)) * 2,
+            by,
+            cw - (bw3 + sc(8)) * 2,
+            sc(36),
+        );
+        for b in [b_refresh, b_create, b_remove] {
+            unsafe {
+                let _ = ShowWindow(b, SW_SHOW);
+            }
+        }
+    }
+    // 「手机屏」组：整宽，三行——型号下拉、自动/手动开关、说明
+    let gy = list_bottom + row_h + sc(12);
+    let gh_phone = sc(108);
     move_ctrl(grp_phone, m, gy, cw, gh_phone);
     let inner = cw - sc(24);
-    let create_w = inner * 55 / 100;
-    move_ctrl(b_create, m + sc(12), gy + sc(20), create_w, sc(36));
-    move_ctrl(
-        b_remove,
-        m + sc(12) + create_w + sc(8),
-        gy + sc(20),
-        inner - create_w - sc(8),
-        sc(36),
-    );
-    move_ctrl(model_label, m + sc(12), gy + sc(66), sc(56), sc(20));
+    move_ctrl(model_label, m + sc(12), gy + sc(22), sc(56), sc(20));
     // 下拉框的矩形高含展开后的列表部分，收起时只占一行
     move_ctrl(
         combo_model,
         m + sc(12) + sc(60),
-        gy + sc(63),
+        gy + sc(19),
         inner - sc(60),
         sc(180),
     );
     let radio_w = inner * 58 / 100;
-    move_ctrl(radio_auto, m + sc(12), gy + sc(94), radio_w, sc(22));
+    move_ctrl(radio_auto, m + sc(12), gy + sc(54), radio_w, sc(22));
     move_ctrl(
         radio_manual,
         m + sc(12) + radio_w + sc(8),
-        gy + sc(94),
+        gy + sc(54),
         inner - radio_w - sc(8),
         sc(22),
     );
-    move_ctrl(phone_hint, m + sc(12), gy + sc(122), inner, sc(18));
-    // 「测试」「驱动」两组并排（驱动组多一行「检查更新」，组高一起加大）
-    let gh = sc(126);
+    move_ctrl(phone_hint, m + sc(12), gy + sc(82), inner, sc(18));
+    // 「测试」组：整宽（原与「驱动」并排，驱动组已去掉——驱动的事归配置向导）
+    let gh = sc(88);
     let ry = gy + gh_phone + sc(12);
-    let half = (cw - sc(8)) / 2;
-    let inner2 = half - sc(24);
+    let inner2 = cw - sc(24);
     let bw = (inner2 - sc(8)) / 2;
-    move_ctrl(grp_test, m, ry, half, gh);
+    move_ctrl(grp_test, m, ry, cw, gh);
     move_ctrl(b_test, m + sc(12), ry + sc(20), bw, sc(36));
     move_ctrl(
         b_launcher,
@@ -438,25 +440,6 @@ fn layout_controls(client_w: i32, client_h: i32) {
         sc(36),
     );
     move_ctrl(test_hint, m + sc(12), ry + sc(62), inner2, sc(18));
-    let gx = m + half + sc(8);
-    move_ctrl(grp_driver, gx, ry, half, gh);
-    move_ctrl(b_install, gx + sc(12), ry + sc(20), bw, sc(36));
-    move_ctrl(
-        b_refresh,
-        gx + sc(12) + bw + sc(8),
-        ry + sc(20),
-        inner2 - bw - sc(8),
-        sc(36),
-    );
-    move_ctrl(b_update, gx + sc(12), ry + sc(62), bw, sc(32));
-    move_ctrl(
-        b_guide,
-        gx + sc(12) + bw + sc(8),
-        ry + sc(62),
-        inner2 - bw - sc(8),
-        sc(32),
-    );
-    move_ctrl(driver_hint, gx + sc(12), ry + sc(102), inner2, sc(18));
     // 日志吃掉剩余高度
     let log_y = ry + gh + sc(12);
     move_ctrl(log_edit, m, log_y, cw, client_h - log_y - m);
@@ -932,7 +915,7 @@ fn apply_phone_scale() {
     }
 }
 
-fn remove_phone_screen() {
+pub(crate) fn remove_phone_screen() {
     ui_log("—— 移除手机屏（恢复配置） ——");
     let state = vdd::load_state();
     // 缩放还原要趁虚拟屏还在时做：后面设备一禁用就够不着这块屏了
@@ -1196,46 +1179,30 @@ fn toggle_launcher() {
     }
 }
 
-/// 启动后查一次驱动在不在：不在就回主窗口问用户要不要开配置向导。
-/// 只在启动时问这一次，不反复打扰。
-fn spawn_driver_prompt(hwnd_raw: usize) {
+/// 每次启动都查一遍驱动在不在，结果回主窗口：不在就直接开配置向导，不弹窗问。
+fn spawn_driver_check(hwnd_raw: usize) {
     std::thread::spawn(move || {
-        let missing = devices::display_adapters()
-            .map(|list| devices::find_vdd(&list).is_none())
+        let found = devices::display_adapters()
+            .map(|list| devices::find_vdd(&list).is_some())
             .unwrap_or(false);
-        if missing {
-            unsafe {
-                let _ = PostMessageW(
-                    Some(HWND(hwnd_raw as *mut _)),
-                    WM_GUIDE_PROMPT,
-                    WPARAM(0),
-                    LPARAM(0),
-                );
-            }
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(hwnd_raw as *mut _)),
+                WM_DRIVER_CHECKED,
+                WPARAM(if found { 1 } else { 0 }),
+                LPARAM(0),
+            );
         }
     });
 }
 
-fn install_vdd() {
-    let exe = std::env::current_exe().unwrap_or_default();
-    let script = exe.with_file_name("setup-virtual-display.ps1");
-    if script.exists() {
-        match std::process::Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                &script.to_string_lossy(),
-            ])
-            .spawn()
-        {
-            Ok(_) => ui_log("已打开虚拟屏搞通脚本窗口：它会自己提权，把驱动装完（官方包 + nefcon 建节点）并验证虚拟屏真的出现；跑完看它的结论，再回来点「创建手机屏」"),
-            Err(e) => ui_log(&format!("启动搞通脚本失败：{e}")),
-        }
-    } else {
-        ui_log("exe 旁边没找到 setup-virtual-display.ps1：它与 exe 在同一个发布包里，确认解压完整");
+/// 按当前客户区重排一遍控件（模式切换后按钮行要出现/消失，跟一次布局）。
+fn relayout(hwnd: HWND) {
+    let mut rc = windows::Win32::Foundation::RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut rc);
     }
+    layout_controls(rc.right - rc.left, rc.bottom - rc.top);
 }
 
 // MARK: 窗口过程
@@ -1450,38 +1417,8 @@ unsafe extern "system" fn main_wnd_proc(
                 9013,
                 ui_font,
             );
-            let grp_driver = mk_control(
-                hwnd,
-                "Button",
-                "驱动",
-                base | WINDOW_STYLE(0x0000_0007), // BS_GROUPBOX
-                0,
-                0,
-                10,
-                10,
-                9014,
-                ui_font,
-            );
-            let btn_install =
-                mk_control(hwnd, "Button", "安装 VDD", base, 0, 0, 10, 10, ID_INSTALL, ui_font);
             let btn_refresh =
                 mk_control(hwnd, "Button", "刷新显示器", base, 0, 0, 10, 10, ID_REFRESH, ui_font);
-            let btn_update =
-                mk_control(hwnd, "Button", "检查更新", base, 0, 0, 10, 10, ID_UPDATE, ui_font);
-            let btn_guide =
-                mk_control(hwnd, "Button", "配置向导", base, 0, 0, 10, 10, ID_GUIDE, ui_font);
-            let driver_hint = mk_control(
-                hwnd,
-                "Static",
-                "没屏先点「配置向导」一步步装；驱动只装一次",
-                base,
-                0,
-                0,
-                10,
-                10,
-                9015,
-                ui_font,
-            );
             let log_edit = mk_control(
                 hwnd,
                 "Edit",
@@ -1504,14 +1441,10 @@ unsafe extern "system" fn main_wnd_proc(
                     btn_remove,
                     btn_test,
                     btn_launcher,
-                    btn_install,
-                    btn_update,
-                    btn_guide,
                     icon_box,
                     detail,
                     grp_phone,
                     grp_test,
-                    grp_driver,
                     combo_model,
                     radio_auto,
                     radio_manual,
@@ -1521,7 +1454,6 @@ unsafe extern "system" fn main_wnd_proc(
                     screen_auto_owned: false,
                     phone_hint,
                     test_hint,
-                    driver_hint,
                     log_edit,
                     log_text: String::new(),
                     displays: Vec::new(),
@@ -1551,11 +1483,20 @@ unsafe extern "system" fn main_wnd_proc(
             session::spawn(hwnd.0 as usize);
             // 启动后静默查一次新版：没有就不打扰，有才弹窗问
             update::spawn_check(hwnd.0 as usize, false);
-            // 配置向导：带 --guide 启动直接打开；否则发现没装驱动时问一句要不要开
+            // 配置向导：带 --guide 启动直接打开；否则每次启动都检测一遍驱动，
+            // 状态区先挂「驱动检测中」，不在就直接开向导（不弹窗问）
             if GUIDE_REQUESTED.load(Ordering::Relaxed) {
                 guide::open(hwnd);
             } else {
-                spawn_driver_prompt(hwnd.0 as usize);
+                let (status_h, detail_h) = MAIN.with(|c| {
+                    c.borrow()
+                        .as_ref()
+                        .map(|s| (s.status, s.detail))
+                        .unwrap_or_default()
+                });
+                set_text(status_h, "驱动检测中…");
+                set_text(detail_h, "正在确认虚拟显示驱动（MttVDD）是否就绪");
+                spawn_driver_check(hwnd.0 as usize);
             }
             LRESULT(0)
         }
@@ -1686,20 +1627,12 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
-        WM_GUIDE_PROMPT => {
-            let text_w = display::wide(
-                "还没检测到虚拟显示驱动（MttVDD），虚拟屏暂时用不了。\n\n打开配置向导，一步步把它装好吗？",
-            );
-            let cap_w = display::wide("SnugWindows");
-            let yes = unsafe {
-                MessageBoxW(
-                    Some(hwnd),
-                    PCWSTR(text_w.as_ptr()),
-                    PCWSTR(cap_w.as_ptr()),
-                    MB_YESNO | MB_ICONQUESTION,
-                )
-            };
-            if yes == IDYES {
+        WM_DRIVER_CHECKED => {
+            refresh_displays();
+            if wparam.0 == 1 {
+                ui_log("驱动检测：MttVDD 已就绪");
+            } else {
+                ui_log("驱动检测：没找到 MttVDD 设备，自动打开配置向导");
                 guide::open(hwnd);
             }
             LRESULT(0)
@@ -1765,15 +1698,15 @@ unsafe extern "system" fn main_wnd_proc(
                 }
                 ID_TEST => toggle_test_window(),
                 ID_LAUNCHER => toggle_launcher(),
-                ID_INSTALL => install_vdd(),
-                ID_UPDATE => {
-                    ui_log("正在检查更新…");
-                    update::spawn_check(hwnd.0 as usize, true);
-                }
-                ID_GUIDE => guide::open(hwnd),
                 ID_MODEL if notify == 1 => on_model_changed(), // 1 = CBN_SELCHANGE
-                ID_MODE_AUTO => apply_auto_setting(true),
-                ID_MODE_MANUAL => apply_auto_setting(false),
+                ID_MODE_AUTO => {
+                    apply_auto_setting(true);
+                    relayout(hwnd);
+                }
+                ID_MODE_MANUAL => {
+                    apply_auto_setting(false);
+                    relayout(hwnd);
+                }
                 _ => {}
             }
             LRESULT(0)
