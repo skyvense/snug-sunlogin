@@ -104,3 +104,6 @@ metadata:
 - 背景：安装脚本三处要从 GitHub 下载（驱动包×2、nefcon×1），国内网络屡屡失败。
 - 做法：钉住版本入仓库 windows/assets/（VDD 官方 25.7.23 驱动四件套 276K + nefcon v1.21.1 x64 nefconc.exe 1.1M，哈希与本机已验证副本一致）；release.yml 的 windows-dist 把它们打进 zip 的 vdd/、nefcon/ 子目录；脚本改随包优先——脚本目录排进 INF 磁盘搜索首位、Get-Nefcon 先查随包 nefcon\nefconc.exe；Ensure-PackageDir 本就有「INF 目录齐全即返回」的短路，随包天然命中；随包缺失才回退在线下载（同事单跑 raw 脚本的路径保留）。
 - 顺带修自动更新的潜在 bug：发布 zip 里有一层 Snug-Sunlogin-Windows-<版本> 目录，旧 swap 脚本在解压根上找 exe 会扑空；改为递归定位 exe 所在目录后整套替换（含 vdd/nefcon 随包目录）。
+
+### 待办（机主 2026-11-20 22:28 提出，后面再调）
+- Windows 版被 iPhone 控制时，虚拟屏画面四角被手机圆角屏裁掉：左上角的悬浮启动器（App）按钮、启动器右上角的关闭按钮都会被圆角遮住一部分。后续把这两个角上的控件往内收（加安全边距）再调。
