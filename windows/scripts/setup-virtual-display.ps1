@@ -476,7 +476,9 @@ $script:ExitCode = 1
 $pc = Get-ProblemCode $vdd.InstanceId
 $drvInf = Get-DriverInfPath $vdd.InstanceId
 Log "节点现状：状态 $($vdd.Status) | 问题码 $pc | 驱动 INF $drvInf"
-if ($pc -eq 28 -or -not $drvInf) {
+if ($vdd.Status -eq 'OK' -and $pc -eq 0) {
+Log '设备状态 OK、问题码 0：驱动已绑好（这个 UMDF 设备的驱动 INF 属性本来就是空的，不当作没绑）'
+} elseif ($pc -eq 28 -or -not $drvInf) {
 Log '节点在、驱动没绑上（问题码 28），依次尝试补绑，每步后复查：'
 Log ' 尝试 A：pnputil /add-driver /install（节点已存在时它能匹配上）'
 pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
@@ -534,120 +536,95 @@ Log "设备带问题码 $pc：$hint。本脚本继续往下走（写配置+重�
 $script:DefaultSettingsXml = @'
 <?xml version='1.0' encoding='utf-8'?>
 <vdd_settings>
-<monitors>
-<count>1</count>
-</monitors>
-<gpu>
-<friendlyname>default</friendlyname>
-</gpu>
-<global>
-<g_refresh_rate>60</g_refresh_rate>
-<g_refresh_rate>90</g_refresh_rate>
-<g_refresh_rate>120</g_refresh_rate>
-<g_refresh_rate>144</g_refresh_rate>
-</global>
-<resolutions>
-<resolution>
-<width>1920</width>
-<height>1080</height>
-<refresh_rate>60</refresh_rate>
-</resolution>
-<resolution>
-<width>2560</width>
-<height>1440</height>
-<refresh_rate>60</refresh_rate>
-</resolution>
-<resolution>
-<width>3840</width>
-<height>2160</height>
-<refresh_rate>60</refresh_rate>
-</resolution>
-<resolution>
-<width>1080</width>
-<height>2346</height>
-<refresh_rate>60</refresh_rate>
-</resolution>
-</resolutions>
-<logging>
-<SendLogsThroughPipe>true</SendLogsThroughPipe>
-<logging>false</logging>
-<debuglogging>false</debuglogging>
-</logging>
-<colour>
-<SDR10bit>false</SDR10bit>
-<HDRPlus>false</HDRPlus>
-<ColourFormat>RGB</ColourFormat>
-</colour>
-<cursor>
-<HardwareCursor>true</HardwareCursor>
-<CursorMaxX>128</CursorMaxX>
-<CursorMaxY>128</CursorMaxY>
-<AlphaCursorSupport>true</AlphaCursorSupport>
-<XorCursorSupportLevel>2</XorCursorSupportLevel>
-</cursor>
-<edid>
-<CustomEdid>false</CustomEdid>
-<PreventSpoof>false</PreventSpoof>
-<EdidCeaOverride>false</EdidCeaOverride>
-</edid>
+    <monitors>
+        <count>1</count>
+    </monitors>
+    <gpu>
+        <friendlyname>default</friendlyname>
+    </gpu>
+	<global>
+		<!--These are global refreshrates, any you add in here, will be replicated to all resolutions-->
+		<g_refresh_rate>60</g_refresh_rate>
+		<g_refresh_rate>90</g_refresh_rate>
+		<g_refresh_rate>120</g_refresh_rate>
+		<g_refresh_rate>144</g_refresh_rate>
+		<g_refresh_rate>165</g_refresh_rate>
+		<g_refresh_rate>244</g_refresh_rate>
+	</global>
+    <resolutions>
+        <resolution>
+            <width>800</width>
+            <height>600</height>
+            <refresh_rate>30</refresh_rate>
+        </resolution>
+        <resolution>
+            <width>1366</width>
+            <height>768</height>
+            <refresh_rate>30</refresh_rate>
+        </resolution>
+        <resolution>
+            <width>1920</width>
+            <height>1080</height>
+            <refresh_rate>30</refresh_rate>
+        </resolution>
+        <resolution>
+            <width>2560</width>
+            <height>1440</height>
+            <refresh_rate>30</refresh_rate>
+        </resolution>
+        <resolution>
+            <width>3840</width>
+            <height>2160</height>
+            <refresh_rate>30</refresh_rate>
+        </resolution>
+    
+        
+    </resolutions>
+    <options>
+		<CustomEdid>false</CustomEdid> <!-- Custom Edid should be named "user_edid.bin"! This does not support emulating resolutions!-->
+		<PreventSpoof>false</PreventSpoof> <!--Enable this to prevent manufacturer spoofing when using custom edid. Please only do so if you need to!-->
+		<EdidCeaOverride>false</EdidCeaOverride> <!--Enable this to override or add hard coded cea-extension block to custom Edid support allowing you to enable HDR-->
+		<HardwareCursor>true</HardwareCursor>
+		<SDR10bit>false</SDR10bit>
+		<HDRPlus>false</HDRPlus> <!-- If you have SDR10 bit enabled, HDRPlus wont work - there’s a conflict because the display system cannot simultaneously handle both high dynamic range 12-bit and standard dynamic range 10-bit settings. -->
+		<logging>false</logging>
+        <!-- DEBUG LOGGING FOR EXPERTS ONLY!-->
+        <debuglogging>false</debuglogging> 
+        <!-- DEBUG LOGS CAN GENERATE 1000+ LINES-->
+		<!-- Warning: Leaving logging on too long can lead to excessive filesize. Especially DebugLogging, which should only be used for short periods to log errors. -->
+		<!-- Logging: Useful to troubleshoot and determine which GPUs are being used, and if displays are working as intended.-->
+		<!-- Debug Logging: Logs local system information with every driver function/event/process. Useful for GitHub Help Tickets.-->
+	</options>
 </vdd_settings>
 '@
 
 function Ensure-VddSettings {
 $dir = 'C:\VirtualDisplayDriver'
 $path = Join-Path $dir 'vdd_settings.xml'
-if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null}
-if (-not (Test-Path $path)) {
-[IO.File]::WriteAllText($path, $script:DefaultSettingsXml, (New-Object Text.UTF8Encoding $false))
-Log "配置文件不存在，已按官方模板新建：$path（内含 1080×2346，count=1）"
+if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+$enc = New-Object Text.UTF8Encoding $false
+if (Test-Path $path) {
+$cur = [IO.File]::ReadAllText($path)
+Log '—— 当前 vdd_settings.xml 全文（出问题时这是第一手证据）——'
+foreach ($ln in ($cur -split "`r?`n")) { Log "  | $ln" }
+Log '—— 全文结束 ——'
+if ($cur.Contains('<options>') -and $cur.Contains('<width>1080</width>') -and $cur.Contains('<logging>true</logging>')) {
+Log '当前配置已是随包结构（<options> 节）且含 1080×2346 与 logging=true，无需改写'
 return
 }
-$bak = "$path.setup-script.bak"
-if (-not (Test-Path $bak)) {
-Copy-Item $path $bak
-Log "原配置已备份为 $bak"
-}
-$text = [IO.File]::ReadAllText($path)
-$orig = $text
-# monitors/count 至少为 1：只动 <monitors> 段内部，其余逐字节保留（与 app 的做法一致）
-$m = [regex]::Match($text, '(?s)<monitors>.*?</monitors>')
-if ($m.Success) {
-$seg = $m.Value
-$cm = [regex]::Match($seg, '<count>\s*(\d+)\s*</count>')
-if ($cm.Success) {
-if ([int]$cm.Groups[1].Value -lt 1) {
-$seg = $seg -replace '<count>\s*\d+\s*</count>', '<count>1</count>'
-$text = $text.Substring(0, $m.Index) + $seg + $text.Substring($m.Index + $m.Length)
-Log 'monitors/count 原本小于 1，已改为 1'
-}
+$bak3 = "$path.pre-v3.bak"
+if (-not (Test-Path $bak3)) { Copy-Item $path $bak3; Log "原配置已另备份为 $bak3" }
+Log '当前配置不是 25.7.23 随包结构：做 A/B——换成驱动包自带的默认配置（只加 1080×2346 并打开 logging），重启设备看虚拟屏出不出来'
 } else {
-$seg = $seg -replace '<monitors>', '<monitors><count>1</count>'
-$text = $text.Substring(0, $m.Index) + $seg + $text.Substring($m.Index + $m.Length)
-Log 'monitors 里没有 count，已补 <count>1</count>'
+Log '配置文件不存在：直接写随包默认配置（加 1080×2346、打开 logging）'
 }
-} else {
-$text = $text -replace '(<vdd_settings[^>]*>)', '$1<monitors><count>1</count></monitors>'
-Log '没有 monitors 节点，已补上'
-}
-if (-not ($text -match '<width>1080</width>' -and $text -match '<height>2346</height>')) {
-$block = "<resolution>`n <width>1080</width>`n <height>2346</height>`n <refresh_rate>60</refresh_rate>`n </resolution>`n "
-if ($text.Contains('</resolutions>')) {
+$text = $script:DefaultSettingsXml
+$block = "<resolution>`n            <width>1080</width>`n            <height>2346</height>`n            <refresh_rate>60</refresh_rate>`n        </resolution>`n        "
 $text = $text.Replace('</resolutions>', $block + '</resolutions>')
-} elseif ($text.Contains('</vdd_settings>')) {
-$text = $text.Replace('</vdd_settings>', "<resolutions>`n $block</resolutions>`n</vdd_settings>")
+$text = $text.Replace('<logging>false</logging>', '<logging>true</logging>')
+[IO.File]::WriteAllText($path, $text, $enc)
+Log "已写入随包结构配置：$path（count=1、含 1080×2346@60、logging=true；debuglogging 保持 false）"
 }
-Log '已往配置加入 1080×2346@60 分辨率'
-} else {
-Log '配置里已有 1080×2346 分辨率'
-}
-if ($text -ne $orig) {
-[IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding $false))
-Log "配置已写入 $path"
-} else {
-Log '配置无需修改'
-}
-}
-
 # ================= 六、生效验证 =================
 if ($vdd -and $script:ExitCode -eq 0) {
 Section '五、配置 vdd_settings.xml'
@@ -692,10 +669,32 @@ $vddNow = Find-VddDevice
 if ($vddNow) {
 Log "设备现状：状态 $($vddNow.Status)，问题码 $(Get-ProblemCode $vddNow.InstanceId)"
 }
-Log '设备在，但等了约 60 秒虚拟屏还没出现在桌面上。依次试：'
-Log ' 1) 重启一次电脑，再跑一遍本脚本（驱动刚建好节点时经常要重启才挂上显示器）；'
-Log ' 2) 腾讯电脑管家若弹过拦截要放行，或临时退出它再跑；'
-Log ' 3) 还不行就把本日志文件发我。'
+Log '—— 取证：驱动自己的日志与系统事件（下一轮分析就靠这些）——'
+try {
+$allFiles = Get-ChildItem 'C:\VirtualDisplayDriver' -Recurse -File -ErrorAction SilentlyContinue
+foreach ($f in $allFiles) { Log " VDD 目录文件：$($f.FullName) | $($f.Length) 字节 | 改于 $($f.LastWriteTime)" }
+foreach ($f in ($allFiles | Where-Object { ($_.Extension -eq '.txt' -or $_.Extension -eq '.log') -and $_.Length -lt 131072 })) {
+Log "—— $($f.FullName) 内容（尾 120 行）——"
+foreach ($ln in (Get-Content $f.FullName -Tail 120 -ErrorAction SilentlyContinue)) { Log "  | $ln" }
+}
+} catch { Log "读 VDD 目录失败：$($_.Exception.Message)" }
+try {
+$svc = Get-Service WUDFRd -ErrorAction Stop
+Log "WUDFRd 服务（UMDF 反射器）：状态 $($svc.Status)，启动类型 $($svc.StartType)"
+} catch { Log "读 WUDFRd 服务失败：$($_.Exception.Message)" }
+try {
+$hostProcs = Get-Process WUDFHost -ErrorAction Stop
+Log "WUDFHost 进程在跑：PID $(($hostProcs | ForEach-Object { $_.Id }) -join ', ')"
+} catch { Log 'WUDFHost 进程没在跑（UMDF 宿主不在，驱动不可能真正工作）' }
+foreach ($logName in @('Microsoft-Windows-CodeIntegrity/Operational', 'Microsoft-Windows-DriverFrameworks-UserMode/Operational')) {
+try {
+$evs = @(Get-WinEvent -FilterHashtable @{ LogName = $logName; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction Stop |
+Where-Object { $_.Message -match 'MttVDD|Virtual Display' } | Select-Object -First 10)
+foreach ($e in $evs) { Log "事件[$logName] $($e.TimeCreated) ID=$($e.Id) 级别=$($e.LevelDisplayName)：$(($e.Message -split "`n")[0])" }
+if ($evs.Count -eq 0) { Log "事件[$logName]：近 30 分钟没有提到 MttVDD 的记录" }
+} catch { Log "事件[$logName] 读不到：$($_.Exception.Message)" }
+}
+Log '随包配置 + logging 已就位、设备也重启过，虚拟屏还是没出现。把本日志发我：里面有当前配置全文、驱动自己的日志和系统事件，下一轮按证据走（重点怀疑：内存完整性拦了驱动 DLL，或 Insider 版本 26300 的 IddCx 兼容问题）。'
 }
 }
 
