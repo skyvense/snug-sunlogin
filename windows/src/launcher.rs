@@ -668,8 +668,13 @@ fn run_action(action: Action, name: &str) {
     let Some(rect) = rect else { return };
     match action {
         Action::Focus(hwnd) => {
-            apps::fullscreen_on(hwnd, rect);
-            crate::ui_log(&format!("资源库：{name} 已全屏到虚拟屏"));
+            if apps::fullscreen_on(hwnd, rect) {
+                crate::ui_log(&format!("资源库：{name} 已全屏到虚拟屏"));
+            } else {
+                crate::ui_log(&format!(
+                    "资源库：{name} 的窗口移动没到位（可能不听 SetWindowPos），把它现在的屏幕位置看一眼，日志发回主会话"
+                ));
+            }
             close();
         }
         Action::Launch(lnk) => {
@@ -680,8 +685,13 @@ fn run_action(action: Action, name: &str) {
                         || w.title.to_lowercase().contains(&name.to_lowercase()))
             });
             if let Some(w) = existing {
-                apps::fullscreen_on(w.hwnd, rect);
-                crate::ui_log(&format!("资源库：{name} 已在运行，窗口已全屏到虚拟屏"));
+                if apps::fullscreen_on(w.hwnd, rect) {
+                    crate::ui_log(&format!("资源库：{name} 已在运行，窗口已全屏到虚拟屏"));
+                } else {
+                    crate::ui_log(&format!(
+                        "资源库：{name} 已在运行，但窗口移动没到位，日志发回主会话"
+                    ));
+                }
                 close();
                 return;
             }
@@ -692,9 +702,20 @@ fn run_action(action: Action, name: &str) {
             }
             crate::ui_log(&format!("资源库：正在打开 {name}，等它的窗口出现…"));
             close();
-            // 等新窗口出现（最多 12 秒）：优先标题/App 名对得上的，其次任意新窗口
+            // 等新窗口出现（最多 12 秒）：标题/App 名对得上的立即认；
+            // 对不上的先攒着——第一个新窗口常是闪屏或加载窗，认最大的那个，
+            // 且要稳定 1.5 秒（期间没再冒出新窗口）才落锤，到点有候选就用候选。
+            let area_of = |h: isize| -> i64 {
+                let mut r = RECT::default();
+                unsafe {
+                    let _ = GetWindowRect(HWND(h as *mut core::ffi::c_void), &mut r);
+                }
+                (r.right - r.left) as i64 * (r.bottom - r.top) as i64
+            };
             let deadline = Instant::now() + Duration::from_secs(12);
             let mut found: Option<isize> = None;
+            let mut candidate: Option<isize> = None;
+            let mut candidate_since = Instant::now();
             while Instant::now() < deadline {
                 pump(250);
                 let now = apps::running_windows();
@@ -706,15 +727,33 @@ fn run_action(action: Action, name: &str) {
                     found = Some(w.hwnd);
                     break;
                 }
-                if let Some(w) = fresh.first() {
-                    found = Some(w.hwnd);
-                    break;
+                let biggest = fresh.iter().max_by_key(|w| area_of(w.hwnd));
+                match (biggest, candidate) {
+                    (Some(b), Some(c)) if b.hwnd == c => {
+                        if candidate_since.elapsed() >= Duration::from_millis(1500) {
+                            found = Some(c);
+                            break;
+                        }
+                    }
+                    (Some(b), _) => {
+                        candidate = Some(b.hwnd);
+                        candidate_since = Instant::now();
+                    }
+                    _ => {}
                 }
+            }
+            if found.is_none() {
+                found = candidate;
             }
             match found {
                 Some(hwnd) => {
-                    apps::fullscreen_on(hwnd, rect);
-                    crate::ui_log(&format!("资源库：{name} 的窗口已全屏到虚拟屏"));
+                    if apps::fullscreen_on(hwnd, rect) {
+                        crate::ui_log(&format!("资源库：{name} 的窗口已全屏到虚拟屏"));
+                    } else {
+                        crate::ui_log(&format!(
+                            "资源库：{name} 的窗口出现了但移动没到位，日志发回主会话"
+                        ));
+                    }
                 }
                 None => {
                     crate::ui_log(&format!(

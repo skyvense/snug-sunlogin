@@ -2,7 +2,8 @@
 //! - 运行中：EnumWindows 枚举顶层窗口（过滤掉工具窗口、无标题、系统外壳和本进程）
 //! - 全部：扫开始菜单「程序」目录（系统级 + 用户级）的 .lnk，就是开始菜单里的「所有应用」
 //! - 图标：SHGetFileInfo 取系统图标（对 .lnk 给的是目标程序的图标）
-//! - 全屏到虚拟屏：先还原、SetWindowPos 挪到目标屏、再最大化——窗口会记着新位置
+//! - 全屏到虚拟屏：先还原、SetWindowPos 挪到目标屏、再最大化——窗口会记着新位置；
+//!   挪完读回窗口矩形验证中心点落没落在目标屏内，没落位重试一次，结果如实返回给调用方记日志
 
 use crate::display::wide;
 use std::path::PathBuf;
@@ -233,22 +234,45 @@ pub fn shell_open(path: &str) -> bool {
 
 /// 把窗口全屏（最大化）到 rect 这块屏上：最小化/最大化先还原，
 /// SetWindowPos 挪过去并按目标尺寸放好，再最大化让它记住这块屏。
-pub fn fullscreen_on(hwnd: isize, rect: RECT) {
+/// 把窗口全屏到目标屏，并验证真的落位（窗口中心在目标屏内）。
+/// 还原/最大化都是异步的：给它一点时间再读回矩形验，没落位重试一次。
+/// 返回是否落位——调用方按结果如实记日志，不许假报成功。
+pub fn fullscreen_on(hwnd: isize, rect: RECT) -> bool {
     let hwnd = HWND(hwnd as *mut core::ffi::c_void);
     unsafe {
-        if IsIconic(hwnd).as_bool() || IsZoomed(hwnd).as_bool() {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
+        for _ in 0..2 {
+            if IsIconic(hwnd).as_bool() || IsZoomed(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                SWP_NOZORDER,
+            );
+            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+            let _ = SetForegroundWindow(hwnd);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            if window_center_in(hwnd, rect) {
+                return true;
+            }
         }
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            rect.left,
-            rect.top,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
-            SWP_NOZORDER,
-        );
-        let _ = ShowWindow(hwnd, SW_MAXIMIZE);
-        let _ = SetForegroundWindow(hwnd);
+        false
     }
+}
+
+/// 窗口中心点在不在目标矩形内（最大化后窗口矩形会略大于屏幕，判中心最稳）。
+fn window_center_in(hwnd: HWND, rect: RECT) -> bool {
+    let mut r = RECT::default();
+    unsafe {
+        if GetWindowRect(hwnd, &mut r).is_err() {
+            return false;
+        }
+    }
+    let cx = (r.left + r.right) / 2;
+    let cy = (r.top + r.bottom) / 2;
+    cx >= rect.left && cx < rect.right && cy >= rect.top && cy < rect.bottom
 }
