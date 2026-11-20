@@ -14,6 +14,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const LAUNCHER_CLASS: &str = "SnugSunloginLauncher";
@@ -502,7 +503,7 @@ unsafe extern "system" fn home_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 let x = (lparam.0 & 0xffff) as i16 as i32;
                 let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
                 let region = home_region();
-                let inside = unsafe { PtInRegion(Some(region), x, y) }.as_bool();
+                let inside = unsafe { PtInRegion(region, x, y) }.as_bool();
                 unsafe {
                     let _ = DeleteObject(HGDIOBJ(region.0));
                 }
