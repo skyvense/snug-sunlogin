@@ -99,3 +99,8 @@ metadata:
 - 机主嫌原生 Win32 整窗系统灰丑。改法（不换框架，全靠自绘）：窗口底色 #F5F5F7；原生分组框撤掉，父窗口 WM_PAINT 手绘白色圆角卡片（矩形由 layout 写入状态），组名改粗体静态标签；五个按钮改 BS_OWNERDRAW 自绘（main.rs draw_button，主窗口与向导共用：创建/向导动作钮=品牌金橙+深棕字，删除=珊瑚红+白字，其余=白底描边，圆角 12，按下变深，禁用灰）；静态文字/单选/日志/列表配色走 WM_CTLCOLOR* 与 LVM 设色统一（状态色保留绿/橙，提示次灰 rgb(110,110,115)，正文 rgb(29,29,31)）。
 - 向导闪烁与自绘的冲突已解：自绘按钮不能再翻 BS_DEFPUSHBUTTON 样式位，闪烁相位改走按钮 GWLP_USERDATA（0/1），draw_button 读到 1 时主按钮变深填充+3px 边。
 - windows 0.59 名称位置教训（均查本地 crate 源码证实）：DRAWITEMSTRUCT 在 UI::Controls、InvalidateRect 与 DrawTextW 在 Graphics::Gdi、EnableWindow 在 UI::Input::KeyboardAndMouse、HDC 在 Gdi 不在 Foundation。
+
+### 2026-11-20 22:1x 驱动与 nefcon 随包打包（机主要求，CI 绿）
+- 背景：安装脚本三处要从 GitHub 下载（驱动包×2、nefcon×1），国内网络屡屡失败。
+- 做法：钉住版本入仓库 windows/assets/（VDD 官方 25.7.23 驱动四件套 276K + nefcon v1.21.1 x64 nefconc.exe 1.1M，哈希与本机已验证副本一致）；release.yml 的 windows-dist 把它们打进 zip 的 vdd/、nefcon/ 子目录；脚本改随包优先——脚本目录排进 INF 磁盘搜索首位、Get-Nefcon 先查随包 nefcon\nefconc.exe；Ensure-PackageDir 本就有「INF 目录齐全即返回」的短路，随包天然命中；随包缺失才回退在线下载（同事单跑 raw 脚本的路径保留）。
+- 顺带修自动更新的潜在 bug：发布 zip 里有一层 Snug-Sunlogin-Windows-<版本> 目录，旧 swap 脚本在解压根上找 exe 会扑空；改为递归定位 exe 所在目录后整套替换（含 vdd/nefcon 随包目录）。
