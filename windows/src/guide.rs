@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{HDC, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{EM_SCROLLCARET, EM_SETSEL};
@@ -195,26 +195,17 @@ fn set_flash(on: bool) {
             SetTimer(Some(hwnd), TIMER_FLASH, 550, None);
         } else {
             let _ = KillTimer(Some(hwnd), TIMER_FLASH);
-            set_def_style(action, false);
+            set_flash_phase(action, 0);
         }
     }
 }
 
-/// 给按钮加/去默认按钮粗边框（闪烁的两态），改完样式要 SWP_FRAMECHANGED 才生效
-fn set_def_style(btn: HWND, def: bool) {
+/// 闪烁相位写进按钮的 GWLP_USERDATA（自绘按钮 draw_button 读它决定深浅/粗边），
+/// 再让按钮重绘一帧。按钮改自绘后不能再靠 BS_DEFPUSHBUTTON 样式位闪了。
+fn set_flash_phase(btn: HWND, phase: i32) {
     unsafe {
-        let style = GetWindowLongW(btn, GWL_STYLE) as u32 & !0xF;
-        SetWindowLongW(btn, GWL_STYLE, (style | if def { 1 } else { 0 }) as i32);
-        let _ = SetWindowPos(
-            btn,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
-        );
-        let _ = InvalidateRect(Some(btn), None, true);
+        SetWindowLongW(btn, GWLP_USERDATA, phase);
+        let _ = InvalidateRect(Some(btn), None, false);
     }
 }
 
@@ -605,7 +596,7 @@ unsafe extern "system" fn guide_wnd_proc(
                 hwnd,
                 "Button",
                 "正在检查…",
-                base,
+                base | WINDOW_STYLE(0x0000_000B), // BS_OWNERDRAW：与主窗口同款自绘
                 sc(20),
                 ch - sc(64),
                 sc(280),
@@ -617,7 +608,7 @@ unsafe extern "system" fn guide_wnd_proc(
                 hwnd,
                 "Button",
                 "关闭",
-                base,
+                base | WINDOW_STYLE(0x0000_000B), // BS_OWNERDRAW
                 cw - sc(170),
                 ch - sc(64),
                 sc(150),
@@ -649,6 +640,22 @@ unsafe extern "system" fn guide_wnd_proc(
             start_check(hwnd.0 as usize);
             LRESULT(0)
         }
+        WM_DRAWITEM => {
+            let dis = unsafe {
+                &*(lparam.0 as *const windows::Win32::UI::Controls::DRAWITEMSTRUCT)
+            };
+            crate::draw_button(dis);
+            LRESULT(1)
+        }
+        WM_CTLCOLORSTATIC => {
+            // 向导里唯一的静态控件是标题：深色字、白底（与主窗口主题一致）
+            let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
+            unsafe {
+                SetTextColor(hdc, crate::rgb(29, 29, 31));
+                SetBkMode(hdc, TRANSPARENT);
+            }
+            LRESULT(crate::card_brush().0 as isize)
+        }
         WM_TIMER => {
             if wparam.0 == TIMER_FLASH {
                 let action = GUIDE.with(|c| {
@@ -662,7 +669,7 @@ unsafe extern "system" fn guide_wnd_proc(
                     }
                 });
                 if let Some((action, phase)) = action {
-                    set_def_style(action, phase);
+                    set_flash_phase(action, if phase { 1 } else { 0 });
                 }
             }
             LRESULT(0)
