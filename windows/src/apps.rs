@@ -1,21 +1,33 @@
 //! App 枚举与窗口安置：启动器（App 资源库）的数据层。
 //! - 运行中：EnumWindows 枚举顶层窗口（过滤掉工具窗口、无标题、系统外壳和本进程）
-//! - 全部：扫开始菜单「程序」目录（系统级 + 用户级）的 .lnk，就是开始菜单里的「所有应用」
-//! - 图标：SHGetFileInfo 取系统图标（对 .lnk 给的是目标程序的图标）
+//! - 全部：开始菜单「程序」目录的 .lnk（解析出目标 exe）∪ shell 的 AppsFolder
+//!   （开始菜单「所有应用」的真身，含没有 .lnk 的打包/UWP 应用）
+//! - 最近使用：%APPDATA%\Microsoft\Windows\Recent 的快捷方式按时间倒序，只留 exe 目标
+//! - 图标：SHGetFileInfo 取系统图标（对 .lnk 给的是目标程序的图标）；UWP 按 PIDL 取
 //! - 全屏到虚拟屏：先还原、SetWindowPos 挪到目标屏、再最大化——窗口会记着新位置；
 //!   挪完读回窗口矩形验证中心点落没落在目标屏内，没落位重试一次，结果如实返回给调用方记日志
 
 use crate::display::wide;
+use std::collections::HashSet;
 use std::path::PathBuf;
-use windows::core::{PCWSTR, PWSTR};
+use windows::core::{Interface, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, RECT};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER,
+    CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
+};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
+use windows::Win32::UI::Shell::Common::{ITEMIDLIST, STRRET};
 use windows::Win32::UI::Shell::{
-    SHGetFileInfoW, ShellExecuteW, SHFILEINFOW, SHGFI_FLAGS, SHGFI_ICON, SHGFI_LARGEICON,
+    ApplicationActivationManager, BHID_SFObject, FOLDERID_AppsFolder,
+    IApplicationActivationManager, IEnumIDList, ILFree, IShellFolder, IShellItem, IShellLinkW,
+    KNOWN_FOLDER_FLAG, SHCONTF_NONFOLDERS, SHGDN_FORPARSING, SHGDN_NORMAL, SHGDNF,
+    SHGFI_FLAGS, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_PIDL, SHGetFileInfoW, SHGetKnownFolderItem,
+    SHParseDisplayName, ShellExecuteW, ShellLink, StrRetToStrW, ACTIVATEOPTIONS, SHFILEINFOW,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -29,11 +41,49 @@ pub struct RunningWindow {
     pub pid: u32,
 }
 
-/// 一个已安装的 App（开始菜单里的一项）。
+/// 一个已安装的 App（开始菜单/AppsFolder 里的一项）。
 #[derive(Clone)]
 pub struct InstalledApp {
     pub name: String,
+    /// 开始菜单快捷方式路径（AppsFolder 独有的项为空）
     pub lnk_path: String,
+    /// 解析出的目标 exe（打包/UWP 项为空）
+    pub exe_path: String,
+    /// 打包/UWP 应用的 AppUserModelID（桌面项为空）
+    pub aumid: String,
+}
+
+impl InstalledApp {
+    /// 启动凭据：优先快捷方式（保留它的参数与工作目录），其次 AUMID，最后 exe 直启。
+    pub fn launch_spec(&self) -> String {
+        if !self.lnk_path.is_empty() {
+            self.lnk_path.clone()
+        } else if !self.aumid.is_empty() {
+            format!("aumid:{}", self.aumid)
+        } else {
+            self.exe_path.clone()
+        }
+    }
+    /// 图标凭据：lnk/exe 直接按路径取，UWP 用 aumid: 前缀（按 PIDL 取）。
+    pub fn icon_key(&self) -> String {
+        if !self.lnk_path.is_empty() {
+            self.lnk_path.clone()
+        } else if !self.exe_path.is_empty() {
+            self.exe_path.clone()
+        } else {
+            format!("aumid:{}", self.aumid)
+        }
+    }
+    /// 去重键：exe 路径优先，其次 AUMID，退回小写名字。
+    pub fn key(&self) -> String {
+        if !self.exe_path.is_empty() {
+            self.exe_path.to_lowercase()
+        } else if !self.aumid.is_empty() {
+            format!("aumid:{}", self.aumid.to_lowercase())
+        } else {
+            self.name.to_lowercase()
+        }
+    }
 }
 
 const WS_EX_TOOLWINDOW: i32 = 0x0000_0080;
@@ -133,7 +183,9 @@ pub fn running_windows() -> Vec<RunningWindow> {
     out
 }
 
-/// 扫开始菜单「程序」目录里的全部 .lnk（递归，深度上限 4），按名字排序、去重。
+/// 「全部」列表 = 开始菜单快捷方式（解析出目标 exe）∪ shell 的 AppsFolder。
+/// AppsFolder 是开始菜单「所有应用」的真身：没有 .lnk 的打包/UWP 应用只在这里有，
+/// 只扫 .lnk 会缺一大块（机主反馈「全部列表感觉不对」的根源）。两边按 exe/AUMID/名字去重。
 pub fn installed_apps() -> Vec<InstalledApp> {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Some(pd) = std::env::var_os("ProgramData") {
@@ -158,9 +210,199 @@ pub fn installed_apps() -> Vec<InstalledApp> {
     for root in &roots {
         collect_lnk(root, 0, &mut apps);
     }
+    // 解析每个 .lnk 的目标 exe：运行中判定从此按 exe 精确匹配，不再靠名字猜
+    for a in apps.iter_mut() {
+        if let Some(t) = resolve_lnk(&a.lnk_path) {
+            a.exe_path = t;
+        }
+    }
     apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     apps.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
+    // AppsFolder 补齐 .lnk 没有的（UWP 等），已有的不重复进
+    let mut keys: HashSet<String> = apps.iter().map(|a| a.key()).collect();
+    let mut names: HashSet<String> = apps.iter().map(|a| a.name.to_lowercase()).collect();
+    for a in apps_folder_apps() {
+        if keys.contains(&a.key()) || names.contains(&a.name.to_lowercase()) {
+            continue;
+        }
+        keys.insert(a.key());
+        names.insert(a.name.to_lowercase());
+        apps.push(a);
+    }
+    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     apps
+}
+
+/// 本线程 COM 初始化（STA）。重复调用、模式冲突都无害，忽略结果。
+fn com_init() {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+}
+
+/// 解析 .lnk 的目标路径（IShellLink + IPersistFile）。失败返回 None。
+fn resolve_lnk(lnk: &str) -> Option<String> {
+    com_init();
+    unsafe {
+        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        let pf: IPersistFile = link.cast().ok()?;
+        let w = wide(lnk);
+        pf.Load(PCWSTR(w.as_ptr()), STGM_READ).ok()?;
+        let mut buf = vec![0u16; 1024];
+        link.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        let s = String::from_utf16_lossy(&buf[..end]);
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    }
+}
+
+/// 取 shell 文件夹里一项的显示名/解析名（STRRET 转字符串）。
+fn display_name(folder: &IShellFolder, pidl: *mut ITEMIDLIST, flags: SHGDNF) -> Option<String> {
+    unsafe {
+        let mut sr = STRRET::default();
+        folder.GetDisplayNameOf(pidl, flags, &mut sr).ok()?;
+        let mut pw = PWSTR::null();
+        StrRetToStrW(&mut sr, Some(pidl), &mut pw).ok()?;
+        if pw.is_null() {
+            return None;
+        }
+        let s = pw.to_string().ok();
+        CoTaskMemFree(Some(pw.0 as *const core::ffi::c_void));
+        s
+    }
+}
+
+/// 枚举 shell 的 AppsFolder：桌面应用解析名就是 exe 路径，打包应用是带 ! 的 AUMID；
+/// 其余解析名（CLSID、控制面板项等）开始菜单也不会当 App 列，跳过。
+fn apps_folder_apps() -> Vec<InstalledApp> {
+    com_init();
+    let mut out = Vec::new();
+    unsafe {
+        let Ok(item) = SHGetKnownFolderItem::<IShellItem>(&FOLDERID_AppsFolder, KNOWN_FOLDER_FLAG(0), None) else {
+            return out;
+        };
+        let folder: IShellFolder = match item.BindToHandler(None, &BHID_SFObject) {
+            Ok(f) => f,
+            Err(_) => return out,
+        };
+        let mut en: Option<IEnumIDList> = None;
+        if folder
+            .EnumObjects(HWND::default(), SHCONTF_NONFOLDERS.0 as u32, &mut en)
+            .is_err()
+        {
+            return out;
+        }
+        let Some(en) = en else { return out };
+        loop {
+            let mut arr: [*mut ITEMIDLIST; 1] = [std::ptr::null_mut()];
+            let mut fetched: u32 = 0;
+            let hr = en.Next(&mut arr, Some(&mut fetched));
+            if hr.is_err() || fetched == 0 || arr[0].is_null() {
+                break;
+            }
+            let pidl = arr[0];
+            let name = display_name(&folder, pidl, SHGDN_NORMAL);
+            let parsing = display_name(&folder, pidl, SHGDN_FORPARSING);
+            CoTaskMemFree(Some(pidl as *const core::ffi::c_void));
+            let (Some(name), Some(parsing)) = (name, parsing) else {
+                continue;
+            };
+            let name = name.trim().to_string();
+            if name.is_empty()
+                || name.starts_with("卸载")
+                || name.to_lowercase().starts_with("uninstall")
+            {
+                continue;
+            }
+            if parsing.to_lowercase().ends_with(".exe") {
+                out.push(InstalledApp {
+                    name,
+                    lnk_path: String::new(),
+                    exe_path: parsing,
+                    aumid: String::new(),
+                });
+            } else if parsing.contains('!') {
+                out.push(InstalledApp {
+                    name,
+                    lnk_path: String::new(),
+                    exe_path: String::new(),
+                    aumid: parsing,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// 最近使用：读 %APPDATA%\Microsoft\Windows\Recent 的快捷方式（按修改时间倒序），
+/// 只留目标是现存 exe 的；能对上已安装列表的复用那一条（启动与图标一致），
+/// 对不上的用快捷方式名单独成条。上限 12 条。
+pub fn recent_apps(installed: &[InstalledApp]) -> Vec<InstalledApp> {
+    let Some(ad) = std::env::var_os("APPDATA") else {
+        return Vec::new();
+    };
+    let dir = PathBuf::from(ad)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Recent");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut lnks: Vec<(std::time::SystemTime, PathBuf)> = rd
+        .flatten()
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|x| x.eq_ignore_ascii_case("lnk"))
+                .unwrap_or(false)
+        })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    lnks.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut out: Vec<InstalledApp> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for (_, p) in lnks {
+        if out.len() >= 12 {
+            break;
+        }
+        let lnk = p.to_string_lossy().into_owned();
+        let Some(target) = resolve_lnk(&lnk) else {
+            continue;
+        };
+        if !target.to_lowercase().ends_with(".exe") || !std::path::Path::new(&target).exists() {
+            continue;
+        }
+        if !seen.insert(target.to_lowercase()) {
+            continue;
+        }
+        if let Some(found) = installed
+            .iter()
+            .find(|a| a.exe_path.eq_ignore_ascii_case(&target))
+        {
+            out.push(found.clone());
+        } else {
+            let name = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if name.is_empty() {
+                continue;
+            }
+            out.push(InstalledApp {
+                name,
+                lnk_path: lnk,
+                exe_path: target,
+                aumid: String::new(),
+            });
+        }
+    }
+    out
 }
 
 fn collect_lnk(dir: &std::path::Path, depth: u32, out: &mut Vec<InstalledApp>) {
@@ -188,15 +430,21 @@ fn collect_lnk(dir: &std::path::Path, depth: u32, out: &mut Vec<InstalledApp>) {
                 out.push(InstalledApp {
                     name: name.to_string(),
                     lnk_path: path.to_string_lossy().into_owned(),
+                    exe_path: String::new(),
+                    aumid: String::new(),
                 });
             }
         }
     }
 }
 
-/// 取系统图标（大图标）。path 可以是 exe 或 .lnk（.lnk 给目标程序的图标）。
+/// 取系统图标（大图标）。path 可以是 exe 或 .lnk（.lnk 给目标程序的图标），
+/// 或 aumid: 前缀（打包应用按 shell:AppsFolder 的 PIDL 取）。
 /// 返回的 HICON 用完要 DestroyIcon。
 pub fn icon_for_path(path: &str) -> Option<isize> {
+    if let Some(aumid) = path.strip_prefix("aumid:") {
+        return icon_for_aumid(aumid);
+    }
     let path_w = wide(path);
     let mut info = SHFILEINFOW::default();
     let r = unsafe {
@@ -212,6 +460,62 @@ pub fn icon_for_path(path: &str) -> Option<isize> {
         None
     } else {
         Some(info.hIcon.0 as isize)
+    }
+}
+
+/// 打包应用的图标：解析 shell:AppsFolder\<AUMID> 的 PIDL，再按 PIDL 取图标。
+fn icon_for_aumid(aumid: &str) -> Option<isize> {
+    com_init();
+    unsafe {
+        let name = wide(&format!("shell:AppsFolder\\{aumid}"));
+        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+        if SHParseDisplayName(PCWSTR(name.as_ptr()), None, &mut pidl, 0, None).is_err()
+            || pidl.is_null()
+        {
+            return None;
+        }
+        let mut info = SHFILEINFOW::default();
+        let r = SHGetFileInfoW(
+            PCWSTR(pidl as *const u16),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_FLAGS(SHGFI_ICON.0 | SHGFI_LARGEICON.0 | SHGFI_PIDL.0),
+        );
+        ILFree(Some(pidl as *const ITEMIDLIST));
+        if r == 0 || info.hIcon.is_invalid() {
+            None
+        } else {
+            Some(info.hIcon.0 as isize)
+        }
+    }
+}
+
+/// 按启动凭据打开 App：aumid: 前缀走打包应用激活，其余按路径 ShellExecute。
+pub fn launch_app(spec: &str) -> bool {
+    if let Some(aumid) = spec.strip_prefix("aumid:") {
+        activate_aumid(aumid)
+    } else {
+        shell_open(spec)
+    }
+}
+
+/// 激活打包/UWP 应用（IApplicationActivationManager）。成功返回 true。
+fn activate_aumid(aumid: &str) -> bool {
+    com_init();
+    unsafe {
+        let mgr: IApplicationActivationManager = match CoCreateInstance(
+            &ApplicationActivationManager,
+            None,
+            CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
+        ) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        let w = wide(aumid);
+        let empty = wide("");
+        mgr.ActivateApplication(PCWSTR(w.as_ptr()), PCWSTR(empty.as_ptr()), ACTIVATEOPTIONS(0))
+            .is_ok()
     }
 }
 
