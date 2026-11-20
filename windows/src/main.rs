@@ -106,7 +106,6 @@ fn run() -> i32 {
             lpfnWndProc: Some(main_wnd_proc),
             hInstance: hinstance,
             hIcon: app_icon,
-            hIconSm: app_icon,
             lpszClassName: PCWSTR(class_w.as_ptr()),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             hbrBackground: HBRUSH(6 as *mut core::ffi::c_void), // COLOR_WINDOW + 1
@@ -135,6 +134,21 @@ fn run() -> i32 {
             Ok(h) => h,
             Err(_) => return 1,
         };
+        // 小图标不在 WNDCLASSW 里（那是 WNDCLASSEXW 的字段），建完窗口用 WM_SETICON 补上
+        if !app_icon.is_invalid() {
+            let _ = SendMessageW(
+                hwnd,
+                WM_SETICON,
+                Some(WPARAM(1)), // ICON_BIG
+                Some(LPARAM(app_icon.0 as isize)),
+            );
+            let _ = SendMessageW(
+                hwnd,
+                WM_SETICON,
+                Some(WPARAM(0)), // ICON_SMALL
+                Some(LPARAM(app_icon.0 as isize)),
+            );
+        }
         let _ = ShowWindow(hwnd, SW_SHOW);
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
