@@ -25,13 +25,23 @@ const WM_GUIDE_CHECKED: u32 = WM_APP + 31;
 const WM_GUIDE_LOG: u32 = WM_APP + 32;
 const WM_GUIDE_INSTALL_DONE: u32 = WM_APP + 33;
 const WM_GUIDE_VERIFIED: u32 = WM_APP + 34;
+const WM_GUIDE_REMOVED: u32 = WM_APP + 35;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Step {
     Check,
     Install,
     Verify,
+    Remove,
+    Test,
     Done,
+}
+
+/// 创建验证用在两处：第 3 步创建完要接着走删除，第 5 步创建完要开测试画面
+#[derive(Clone, Copy, PartialEq)]
+enum VerifyFor {
+    Create,
+    Test,
 }
 
 #[derive(Clone)]
@@ -48,6 +58,7 @@ struct Inbox {
     log: Vec<String>,
     install_exit: Option<i32>,
     verify: Option<u32>,
+    removed: Option<bool>,
 }
 
 static INBOX: Mutex<Inbox> = Mutex::new(Inbox {
@@ -55,6 +66,7 @@ static INBOX: Mutex<Inbox> = Mutex::new(Inbox {
     log: Vec::new(),
     install_exit: None,
     verify: None,
+    removed: None,
 });
 
 struct GuideState {
@@ -64,7 +76,7 @@ struct GuideState {
     step: Step,
     busy: bool,
     device_ok: bool,
-    phone_ok: bool,
+    verify_for: VerifyFor,
     after_install: bool,
     text: String,
 }
@@ -290,6 +302,21 @@ fn start_install(hwnd_raw: usize) {
     });
 }
 
+fn start_remove_poll(hwnd_raw: usize) {
+    std::thread::spawn(move || {
+        let mut removed = false;
+        for _ in 0..40 {
+            if !display::list().iter().any(|d| d.is_virtual()) {
+                removed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        INBOX.lock().unwrap().removed = Some(removed);
+        post(hwnd_raw, WM_GUIDE_REMOVED, 0);
+    });
+}
+
 fn start_verify(hwnd_raw: usize) {
     std::thread::spawn(move || {
         let mut code = 0u32;
@@ -309,24 +336,16 @@ fn start_verify(hwnd_raw: usize) {
     });
 }
 
-fn goto_verify() {
-    let phone_ok = GUIDE.with(|c| {
-        let mut cell = c.borrow_mut();
-        match cell.as_mut() {
-            Some(s) => {
-                s.step = Step::Verify;
-                s.after_install = false;
-                s.phone_ok
-            }
-            None => false,
+fn goto_create() {
+    GUIDE.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.step = Step::Verify;
+            s.verify_for = VerifyFor::Create;
+            s.after_install = false;
         }
     });
-    if phone_ok {
-        finish_success();
-        return;
-    }
     set_text(
-        "第 3 步（共 3 步）：创建手机屏并验证\n\n\
+        "第 3 步（共 5 步）：创建手机屏并验证\n\n\
          驱动已经就绪。点下面的按钮，向导会让主程序创建一块手机尺寸的虚拟屏，\
          并确认它真的出现在桌面上。\n\n\
          创建时屏幕可能会闪一下，属正常现象。",
@@ -334,11 +353,10 @@ fn goto_verify() {
     set_action("创建手机屏并验证", true);
 }
 
-fn finish_success() {
+fn goto_remove() {
     GUIDE.with(|c| {
         if let Some(s) = c.borrow_mut().as_mut() {
-            s.step = Step::Done;
-            s.busy = false;
+            s.step = Step::Remove;
         }
     });
     let dims = display::list()
@@ -347,12 +365,29 @@ fn finish_success() {
         .map(|d| format!("{}×{}", d.width, d.height))
         .unwrap_or_default();
     set_text(&format!(
-        "全部搞通 ✓\n\n\
-         虚拟屏已经创建并验证通过（{dims}）。\n\n\
-         现在可以用手机打开向日葵，选这块虚拟屏连进来。\n\
-         向导可以关了，之后日常使用不需要再走一遍。"
+        "第 4 步（共 5 步）：删除手机屏并验证\n\n\
+         ✓ 手机屏已创建并验证通过（{dims}）。\n\n\
+         接着验证删除：点下面的按钮，向导会把这块屏删掉，并确认它真的从桌面上消失。\
+         删不掉的话自动模式断开时也拆不掉，所以这一步必须过。"
     ));
-    set_action("完成", true);
+    set_action("删除手机屏并验证", true);
+}
+
+fn goto_test() {
+    GUIDE.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.step = Step::Test;
+            s.verify_for = VerifyFor::Test;
+        }
+    });
+    set_text(
+        "第 5 步（共 5 步）：打开测试画面\n\n\
+         ✓ 删除已验证通过。\n\n\
+         最后一步：重新创建手机屏，并把串流测试画面铺满它。\
+         点下面的按钮之后，用手机打开向日葵连进这块虚拟屏，\
+         看动画顺不顺、帧号跳不跳——顺了就算全程搞通。",
+    );
+    set_action("创建并打开测试画面", true);
 }
 
 fn on_checked() {
@@ -364,7 +399,6 @@ fn on_checked() {
             Some(s) => {
                 s.busy = false;
                 s.device_ok = r.device.is_some();
-                s.phone_ok = r.phone_now;
                 s.after_install
             }
             None => false,
@@ -382,7 +416,7 @@ fn on_checked() {
         if after_install {
             append_line("\n安装成功，驱动已经装好了。");
         }
-        set_action("下一步：验证虚拟屏", true);
+        set_action("下一步：创建手机屏", true);
     } else {
         append_line("✗ 没找到虚拟显示驱动设备（MttVDD）");
         if after_install {
@@ -424,6 +458,7 @@ fn on_action(hwnd: HWND) {
             GUIDE.with(|c| {
                 if let Some(s) = c.borrow_mut().as_mut() {
                     s.busy = true;
+                    s.verify_for = VerifyFor::Create;
                 }
             });
             append_line("\n正在创建手机屏并验证（最长等 20 秒）…");
@@ -431,9 +466,32 @@ fn on_action(hwnd: HWND) {
             crate::create_phone_screen();
             start_verify(hwnd.0 as usize);
         }
+        Step::Remove => {
+            GUIDE.with(|c| {
+                if let Some(s) = c.borrow_mut().as_mut() {
+                    s.busy = true;
+                }
+            });
+            append_line("\n正在删除手机屏并验证（最长等 20 秒）…");
+            set_action("正在验证…", false);
+            crate::remove_phone_screen();
+            start_remove_poll(hwnd.0 as usize);
+        }
+        Step::Test => {
+            GUIDE.with(|c| {
+                if let Some(s) = c.borrow_mut().as_mut() {
+                    s.busy = true;
+                    s.verify_for = VerifyFor::Test;
+                }
+            });
+            append_line("\n正在创建手机屏并打开测试画面（最长等 20 秒）…");
+            set_action("正在验证…", false);
+            crate::create_phone_screen();
+            start_verify(hwnd.0 as usize);
+        }
         Step::Check | Step::Install => {
             if device_ok {
-                goto_verify();
+                goto_create();
             } else {
                 GUIDE.with(|c| {
                     if let Some(s) = c.borrow_mut().as_mut() {
@@ -442,7 +500,7 @@ fn on_action(hwnd: HWND) {
                     }
                 });
                 set_text(
-                    "第 2 步（共 3 步）：安装驱动\n\n正在安装，输出在下面实时滚动，不要关这个窗口…\n",
+                    "第 2 步（共 5 步）：安装驱动\n\n正在安装，输出在下面实时滚动，不要关这个窗口…\n",
                 );
                 set_action("正在安装…", false);
                 start_install(hwnd.0 as usize);
@@ -527,15 +585,15 @@ unsafe extern "system" fn guide_wnd_proc(
                     step: Step::Check,
                     busy: true,
                     device_ok: false,
-                    phone_ok: false,
+                    verify_for: VerifyFor::Create,
                     after_install: false,
                     text: String::new(),
                 });
             });
             set_text(
-                "第 1 步（共 3 步）：检查驱动\n\n\
-                 这个向导会一步步把虚拟屏搞通：先检查驱动在不在，缺了就装，\
-                 最后创建一块手机屏验证。\n\n正在检查…",
+                "第 1 步（共 5 步）：检查驱动\n\n\
+                 这个向导会一步步把虚拟屏搞通：检查驱动 → 缺了就装 → \
+                 创建、删除各验证一遍 → 最后打开测试画面看串流。\n\n正在检查…",
             );
             start_check(hwnd.0 as usize);
             LRESULT(0)
@@ -582,14 +640,58 @@ unsafe extern "system" fn guide_wnd_proc(
         }
         WM_GUIDE_VERIFIED => {
             let code = INBOX.lock().unwrap().verify.take().unwrap_or(0);
-            GUIDE.with(|c| {
-                if let Some(s) = c.borrow_mut().as_mut() {
-                    s.busy = false;
+            let verify_for = GUIDE.with(|c| {
+                let mut cell = c.borrow_mut();
+                match cell.as_mut() {
+                    Some(s) => {
+                        s.busy = false;
+                        s.verify_for
+                    }
+                    None => VerifyFor::Create,
                 }
             });
-            match code {
-                2 => finish_success(),
-                1 => {
+            match (code, verify_for) {
+                (2, VerifyFor::Create) => goto_remove(),
+                (2, VerifyFor::Test) => {
+                    // 测试画面铺到虚拟屏上，向导收官，屏留着给用户拿手机看
+                    let target = display::list()
+                        .into_iter()
+                        .find(|d| d.is_virtual() && d.is_phone_mode());
+                    GUIDE.with(|c| {
+                        if let Some(s) = c.borrow_mut().as_mut() {
+                            s.step = Step::Done;
+                        }
+                    });
+                    match target {
+                        Some(d) => {
+                            match crate::testwin::open(
+                                d.x,
+                                d.y,
+                                d.width as i32,
+                                d.height as i32,
+                            ) {
+                                Ok(()) => set_text(&format!(
+                                    "全部搞通 ✓\n\n\
+                                     驱动安装、创建、删除都验证过了，测试画面已经铺在虚拟屏上（{}×{}）。\n\n\
+                                     现在用手机打开向日葵连进这块屏，看动画顺不顺、帧号跳不跳。\
+                                     测试画面按 Esc 或点它上面的「关闭」退出。\n\
+                                     向导可以关了，之后日常使用不需要再走一遍。",
+                                    d.width, d.height
+                                )),
+                                Err(e) => set_text(&format!(
+                                    "创建和删除都验证过了，但测试画面没打开：{e}\n\n\
+                                     可以回主窗口点「测试窗口」手动开。向导可以关了。"
+                                )),
+                            }
+                        }
+                        None => set_text(
+                            "创建和删除都验证过了，但回头没找到手机屏。\
+                             回主窗口看一眼状态。向导可以关了。",
+                        ),
+                    }
+                    set_action("完成", true);
+                }
+                (1, _) => {
                     append_line(
                         "\n虚拟屏出现了，但还不是手机尺寸。主窗口日志里有创建细节，\
                          也可以点「重试」再来一次。",
@@ -603,6 +705,24 @@ unsafe extern "system" fn guide_wnd_proc(
                     );
                     set_action("重试", true);
                 }
+            }
+            LRESULT(0)
+        }
+        WM_GUIDE_REMOVED => {
+            let removed = INBOX.lock().unwrap().removed.take().unwrap_or(false);
+            GUIDE.with(|c| {
+                if let Some(s) = c.borrow_mut().as_mut() {
+                    s.busy = false;
+                }
+            });
+            if removed {
+                goto_test();
+            } else {
+                append_line(
+                    "\n等了 20 秒虚拟屏还在桌面上，删除没验证过。主窗口日志里有删除过程的细节；\
+                     也可以点「重试」。",
+                );
+                set_action("重试", true);
             }
             LRESULT(0)
         }
