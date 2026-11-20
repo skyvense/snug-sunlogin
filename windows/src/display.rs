@@ -33,8 +33,12 @@ impl DisplayInfo {
     }
     /// 是不是 VDD 的虚拟屏：适配器名在不同 VDD 版本里有两种叫法。
     pub fn is_virtual(&self) -> bool {
-        self.adapter_name.contains("Virtual Display")
-            || self.adapter_name.contains("IddSample")
+        // 只认 MttVDD 本尊：它的 INF 里 DeviceDesc 就是 "Virtual Display Driver"，
+        // EnumDisplayDevices 报的适配器名与之一致。别家虚拟屏（GameViewer Virtual
+        // Display Adapter、AskLink 等）名字里也带 Virtual Display，宽松匹配会把
+        // 人家的屏当成手机屏去改分辨率/缩放（2026-11-20 同事机器实测）。
+        self.adapter_name.starts_with("Virtual Display Driver")
+            || self.adapter_name.contains("MttVDD")
     }
     pub fn describe(&self) -> String {
         let mut s = format!(

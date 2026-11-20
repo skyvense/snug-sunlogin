@@ -12,6 +12,7 @@ pub struct PnpDevice {
     pub friendly_name: String,
     pub instance_id: String,
     pub status: String,
+    pub hardware_ids: Vec<String>,
 }
 
 /// 跑一个外部程序（不弹控制台窗口），返回 (退出码, stdout+stderr 合并文本)。
@@ -32,7 +33,9 @@ pub fn run(program: &str, args: &[&str]) -> (i32, String) {
 /// 列出在场的显示适配器（-PresentOnly：不含已消失的幽灵设备，
 /// 免得重启设备时挑中一个早就不在的实例）。失败返回错误说明（不静默）。
 pub fn display_adapters() -> Result<Vec<PnpDevice>, String> {
-    let script = "Get-PnpDevice -PresentOnly -Class Display | ForEach-Object { $_.FriendlyName + '|' + $_.InstanceId + '|' + $_.Status }";
+    // 第四段是硬件 ID 列表（分号分隔）：find_vdd 靠它精确认 MttVDD 本尊。
+    // 只对显示类这几台设备取属性，开销可控（全系统取属性才会慢）。
+    let script = "Get-PnpDevice -PresentOnly -Class Display | ForEach-Object { $hw = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data -join ';'; $_.FriendlyName + '|' + $_.InstanceId + '|' + $_.Status + '|' + $hw }";
     let (exit, output) = run(
         "powershell.exe",
         &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
@@ -46,11 +49,20 @@ pub fn display_adapters() -> Result<Vec<PnpDevice>, String> {
     let mut devices = Vec::new();
     for line in output.lines() {
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() == 3 {
+        if parts.len() == 3 || parts.len() == 4 {
             devices.push(PnpDevice {
                 friendly_name: parts[0].trim().to_string(),
                 instance_id: parts[1].trim().to_string(),
                 status: parts[2].trim().to_string(),
+                hardware_ids: if parts.len() == 4 {
+                    parts[3]
+                        .split(';')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                } else {
+                    Vec::new()
+                },
             });
         }
     }
@@ -79,26 +91,26 @@ pub fn problem_devices() -> Result<Vec<PnpDevice>, String> {
                 friendly_name: parts[0].trim().to_string(),
                 instance_id: parts[1].trim().to_string(),
                 status: parts[2].trim().to_string(),
+                hardware_ids: Vec::new(),
             });
         }
     }
     Ok(devices)
 }
 
-/// VDD 的适配器在设备管理器里一般叫 Virtual Display Driver；不同版本命名可能不同，
-/// 名字与实例 ID 都查：现行 VDD 的实例 ID 带 MTTVDD（Root\MttVDD\…），
-/// IddSample 系带 IDDSAMPLE，大小写不敏感。按实例 ID 认最稳——不依赖本地化的名字。
+/// 在显示适配器里找 MttVDD 本尊（匹配规则见函数内注释）。
 pub fn find_vdd(devices: &[PnpDevice]) -> Option<&PnpDevice> {
+    // 只认 MttVDD 本尊：实例 ID 带 MTTVDD，或硬件 ID 精确等于 Root\MttVDD / MttVDD
+    // （INF 里就这两个）。绝不按友好名模糊匹配——机器上常有别家的虚拟显示适配器
+    // （GameViewer、AskLink 等），它们名字里同样带「Virtual Display」且枚举顺序
+    // 可能在前，旧写法会先命中它们，去启用/重启/禁用别人的设备
+    // （2026-11-20 同事机器实测踩中）。找不到就如实返回 None，让调用方明确报错。
     devices.iter().find(|d| {
-        let name = d.friendly_name.to_lowercase();
-        let id = d.instance_id.to_lowercase();
-        name.contains("virtual display")
-            || name.contains("virtualdisplaydriver")
-            || name.contains("mttvdd")
-            || name.contains("iddsample")
-            || id.contains("mttvdd")
-            || id.contains("iddsample")
-            || id.contains("idd_sample")
+        d.instance_id.to_lowercase().contains("mttvdd")
+            || d.hardware_ids.iter().any(|h| {
+                let h = h.trim().to_lowercase();
+                h == "root\\mttvdd" || h == "mttvdd"
+            })
     })
 }
 
