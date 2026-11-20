@@ -25,8 +25,11 @@ use display::DisplayInfo;
 use std::cell::RefCell;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::core::{w, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{
+    COLORREF, ERROR_ALREADY_EXISTS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM,
+};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::Graphics::Gdi::{
     CreateFontW, GetDC, GetDeviceCaps, ReleaseDC, SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
     CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, HBRUSH, HDC, HFONT,
@@ -107,6 +110,20 @@ fn main() {
     std::panic::set_hook(Box::new(|info| {
         log::write(&format!("PANIC：{info}"));
     }));
+    // 单实例：双开时两个进程会同时盯会话、抢着建/拆同一块虚拟屏
+    // （2026-11-20 实测有用户同时开了两个）。互斥量句柄留到进程退出才释放。
+    let _instance = unsafe {
+        match CreateMutexW(None, false, w!("SnugSunloginWindows.SingleInstance")) {
+            Ok(h) => {
+                if GetLastError() == ERROR_ALREADY_EXISTS {
+                    log::write("已有 SnugWindows 实例在运行，本实例退出");
+                    return;
+                }
+                Some(h)
+            }
+            Err(_) => None,
+        }
+    };
     std::process::exit(run());
 }
 
@@ -734,7 +751,7 @@ fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
                 exit == 0
             }
             None => {
-                ui_log("没找到 VDD 显示适配器（驱动没装？）");
+                ui_log("没找到 MttVDD 设备（硬件 ID ROOT\\MttVDD）——驱动没装好，先运行安装脚本 setup-virtual-display.ps1");
                 false
             }
         },
