@@ -65,7 +65,8 @@ struct LauncherState {
 struct HomeState {
     hwnd: HWND,
     rect: RECT,
-    font: HFONT,
+    /// 手指/鼠标正按着：绘制按压态（缩小 + 变暗），抬起才触发打开资源库。
+    pressed: bool,
 }
 
 thread_local! {
@@ -301,7 +302,7 @@ fn show_home(rect: RECT) {
             *c.borrow_mut() = Some(HomeState {
                 hwnd: HWND::default(),
                 rect,
-                font: make_font(-24, 600),
+                pressed: false,
             });
         });
         let class_w = wide(HOME_CLASS);
@@ -314,8 +315,8 @@ fn show_home(rect: RECT) {
                 WS_POPUP,
                 rect.left + 18,
                 rect.top + 18,
-                76,
-                76,
+                HOME_SIZE,
+                HOME_SIZE,
                 None,
                 None,
                 Some(hinstance()),
@@ -328,6 +329,10 @@ fn show_home(rect: RECT) {
                     s.hwnd = hwnd;
                 }
             });
+            // 异形窗：窗口形状就是图标的双屏叠片轮廓（连阴影），轮廓外不画也不接点击
+            unsafe {
+                let _ = SetWindowRgn(hwnd, Some(home_region()), true);
+            }
         }
     }
     let hwnd = HOME.with(|c| c.borrow().as_ref().map(|s| s.hwnd));
@@ -351,43 +356,172 @@ fn hide_home() {
     }
 }
 
+/// 悬浮键边长（物理像素）：比旧的 76 大一圈，手机上好点。
+const HOME_SIZE: i32 = 104;
+/// 图标的两块屏（后屏在左上、前屏在右下，互相叠着），与 App 图标同一构图。
+fn plate_rects() -> (RECT, RECT) {
+    (
+        RECT { left: 16, top: 8, right: 68, bottom: 88 },
+        RECT { left: 38, top: 18, right: 90, bottom: 98 },
+    )
+}
+
+fn offset_rect(r: RECT, dx: i32, dy: i32) -> RECT {
+    RECT { left: r.left + dx, top: r.top + dy, right: r.right + dx, bottom: r.bottom + dy }
+}
+
+/// 以中心为原点缩放（按压态把整个标记缩到 92%）。
+fn scale_rect(r: RECT, milli: i32) -> RECT {
+    let c = HOME_SIZE / 2;
+    let f = |v: i32| c + (v - c) * milli / 1000;
+    RECT { left: f(r.left), top: f(r.top), right: f(r.right), bottom: f(r.bottom) }
+}
+
+/// 悬浮键的窗口轮廓：两块屏 + 它们右下偏移的阴影，并集。
+/// 每次调用新建一个 HRGN：给 SetWindowRgn 的由系统接管，给 PtInRegion 的用完自己删。
+fn home_region() -> HRGN {
+    let (back, front) = plate_rects();
+    let parts = [back, front, offset_rect(back, 3, 5), offset_rect(front, 3, 5)];
+    let mut acc = unsafe { CreateRoundRectRgn(parts[0].left, parts[0].top, parts[0].right, parts[0].bottom, 26, 26) };
+    for p in &parts[1..] {
+        let r = unsafe { CreateRoundRectRgn(p.left, p.top, p.right, p.bottom, 26, 26) };
+        unsafe {
+            CombineRgn(Some(acc), Some(acc), Some(r), RGN_OR);
+            let _ = DeleteObject(HGDIOBJ(r.0));
+        }
+    }
+    acc
+}
+
+type Rgb = (i32, i32, i32);
+
+fn shade(c: Rgb, milli: i32) -> COLORREF {
+    let f = |v: i32| ((v * milli / 1000).clamp(0, 255)) as u32;
+    rgb(f(c.0), f(c.1), f(c.2))
+}
+
+fn lerp_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
+    let f = |x: i32, y: i32| x + ((y - x) as f32 * t) as i32;
+    (f(a.0, b.0), f(a.1, b.1), f(a.2, b.2))
+}
+
+/// 在圆角矩形内填竖向渐变：先把裁剪区设成这块屏的轮廓，再逐行刷。
+fn draw_plate(hdc: HDC, rc: RECT, top: Rgb, bottom: Rgb, outline: Rgb, bright: i32) {
+    unsafe {
+        let clip = CreateRoundRectRgn(rc.left, rc.top, rc.right, rc.bottom, 26, 26);
+        SelectClipRgn(hdc, Some(clip));
+        let h = (rc.bottom - rc.top - 1).max(1) as f32;
+        for y in rc.top..rc.bottom {
+            let c = shade(lerp_rgb(top, bottom, (y - rc.top) as f32 / h), bright);
+            let brush = CreateSolidBrush(c);
+            let row = RECT { left: rc.left, top: y, right: rc.right, bottom: y + 1 };
+            FillRect(hdc, &row, brush);
+            let _ = DeleteObject(HGDIOBJ(brush.0));
+        }
+        SelectClipRgn(hdc, None);
+        let _ = DeleteObject(HGDIOBJ(clip.0));
+        // 轮廓描边把两块屏分开，叠片的层次靠它
+        let pen = CreatePen(PS_SOLID, 2, shade(outline, bright));
+        let old_p = SelectObject(hdc, HGDIOBJ(pen.0));
+        let null_brush = GetStockObject(NULL_BRUSH);
+        let old_b = SelectObject(hdc, null_brush);
+        let _ = RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 26, 26);
+        SelectObject(hdc, old_p);
+        SelectObject(hdc, old_b);
+        let _ = DeleteObject(HGDIOBJ(pen.0));
+    }
+}
+
+fn paint_home(hwnd: HWND) {
+    let pressed = HOME.with(|c| c.borrow().as_ref().map(|s| s.pressed).unwrap_or(false));
+    unsafe {
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = BeginPaint(hwnd, &mut ps);
+        let mut rc = RECT::default();
+        let _ = GetClientRect(hwnd, &mut rc);
+        let scale = if pressed { 920 } else { 1000 };
+        let bright = if pressed { 800 } else { 1000 };
+        // 底铺阴影色：轮廓里没被屏盖住的部分就是阴影的月牙边
+        let shadow = CreateSolidBrush(shade((101, 74, 18), bright));
+        FillRect(hdc, &rc, shadow);
+        let _ = DeleteObject(HGDIOBJ(shadow.0));
+        let (back, front) = plate_rects();
+        draw_plate(
+            hdc,
+            scale_rect(back, scale),
+            (255, 224, 102),
+            (255, 194, 26),
+            (204, 150, 0),
+            bright,
+        );
+        draw_plate(
+            hdc,
+            scale_rect(front, scale),
+            (255, 176, 58),
+            (255, 138, 0),
+            (217, 119, 0),
+            bright,
+        );
+        let _ = EndPaint(hwnd, &ps);
+    }
+}
+
+fn set_home_pressed(hwnd: HWND, pressed: bool) {
+    HOME.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.pressed = pressed;
+        }
+    });
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, true);
+    }
+}
+
 unsafe extern "system" fn home_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_PAINT => {
+            paint_home(hwnd);
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            // 按下先给反馈（缩 + 暗），抬起才算数——和系统按钮一个手感
+            set_home_pressed(hwnd, true);
             unsafe {
-                let mut ps = PAINTSTRUCT::default();
-                let hdc = BeginPaint(hwnd, &mut ps);
-                let mut rc = RECT::default();
-                let _ = GetClientRect(hwnd, &mut rc);
-                let brush = CreateSolidBrush(rgb(255, 255, 255));
-                let pen = CreatePen(PS_SOLID, 2, rgb(243, 107, 83));
-                let old_b = SelectObject(hdc, HGDIOBJ(brush.0));
-                let old_p = SelectObject(hdc, HGDIOBJ(pen.0));
-                let _ = RoundRect(hdc, 2, 2, rc.right - 2, rc.bottom - 2, 24, 24);
-                SelectObject(hdc, old_b);
-                SelectObject(hdc, old_p);
-                let _ = DeleteObject(HGDIOBJ(brush.0));
-                let _ = DeleteObject(HGDIOBJ(pen.0));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, rgb(35, 35, 40));
-                let font = HOME.with(|c| c.borrow().as_ref().map(|s| s.font));
-                if let Some(font) = font {
-                    let old_f = SelectObject(hdc, HGDIOBJ(font.0));
-                    let mut text = text16("App");
-                    let mut tr = rc;
-                    let _ = DrawTextW(hdc, &mut text, &mut tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                    SelectObject(hdc, old_f);
-                }
-                let _ = EndPaint(hwnd, &ps);
+                let _ = SetCapture(hwnd);
             }
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            let rect = HOME.with(|c| c.borrow().as_ref().map(|s| s.rect));
-            if let Some(rect) = rect {
-                if let Err(e) = open(rect) {
-                    crate::log::write(&format!("打开资源库失败：{e}"));
+            let was_pressed = HOME.with(|c| c.borrow().as_ref().map(|s| s.pressed).unwrap_or(false));
+            set_home_pressed(hwnd, false);
+            unsafe {
+                let _ = ReleaseCapture();
+            }
+            if was_pressed {
+                // 抬起的位置还在图标轮廓内才打开（滑出去松手 = 取消）
+                let x = (lparam.0 & 0xffff) as i16 as i32;
+                let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
+                let region = home_region();
+                let inside = unsafe { PtInRegion(Some(region), x, y) }.as_bool();
+                unsafe {
+                    let _ = DeleteObject(HGDIOBJ(region.0));
                 }
+                if inside {
+                    let rect = HOME.with(|c| c.borrow().as_ref().map(|s| s.rect));
+                    if let Some(rect) = rect {
+                        if let Err(e) = open(rect) {
+                            crate::log::write(&format!("打开资源库失败：{e}"));
+                        }
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            // 捕获被别人抢走时别把按压态挂死
+            let pressed = HOME.with(|c| c.borrow().as_ref().map(|s| s.pressed).unwrap_or(false));
+            if pressed {
+                set_home_pressed(hwnd, false);
             }
             LRESULT(0)
         }
@@ -400,11 +534,7 @@ unsafe extern "system" fn home_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         }
         WM_DESTROY => {
             HOME.with(|c| {
-                if let Some(s) = c.borrow_mut().take() {
-                    unsafe {
-                        let _ = DeleteObject(HGDIOBJ(s.font.0));
-                    }
-                }
+                let _ = c.borrow_mut().take();
             });
             LRESULT(0)
         }
