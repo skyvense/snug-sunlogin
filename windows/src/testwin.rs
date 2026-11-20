@@ -32,6 +32,11 @@ struct TestState {
     vy: i32,
     w: i32,
     h: i32,
+    // 双缓冲的后备缓冲缓存：一帧建一帧删大位图是卡顿和闪烁的来源，建一次反复用
+    buf_dc: HDC,
+    buf_bmp: HBITMAP,
+    buf_w: i32,
+    buf_h: i32,
 }
 
 thread_local! {
@@ -127,6 +132,10 @@ pub fn open(x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
             vy: 4,
             w,
             h,
+            buf_dc: HDC::default(),
+            buf_bmp: HBITMAP::default(),
+            buf_w: 0,
+            buf_h: 0,
         });
     });
     let class_w = wide(CLASS_NAME);
@@ -136,7 +145,8 @@ pub fn open(x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
             WINDOW_EX_STYLE(0),
             PCWSTR(class_w.as_ptr()),
             PCWSTR(title_w.as_ptr()),
-            WS_POPUP | WS_VISIBLE,
+            // WS_CLIPCHILDREN：父窗口重绘时避开子按钮区域，否则每帧 BitBlt 盖住按钮再等它自绘 = 按钮一直闪
+            WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
             x,
             y,
             w,
@@ -177,8 +187,8 @@ fn toggle_dynamic() {
 
 fn paint(hwnd: HWND) {
     TEST.with(|c| {
-        let cell = c.borrow();
-        let Some(s) = cell.as_ref() else { return };
+        let mut cell = c.borrow_mut();
+        let Some(s) = cell.as_mut() else { return };
         unsafe {
             let mut ps = PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
@@ -186,10 +196,20 @@ fn paint(hwnd: HWND) {
             let _ = GetClientRect(hwnd, &mut rc);
             let (w, h) = (rc.right - rc.left, rc.bottom - rc.top);
             if w > 0 && h > 0 {
-                // 双缓冲：先画到内存 DC 再整幅贴上，避免闪烁干扰串流判断
-                let mem = CreateCompatibleDC(Some(hdc));
-                let bmp = CreateCompatibleBitmap(hdc, w, h);
-                let old_bmp = SelectObject(mem, HGDIOBJ(bmp.0));
+                // 双缓冲画到缓存的后备缓冲再整幅贴上：缓冲建一次反复用，
+                // 每帧新建/销毁整屏位图（1080×2346 约 10 MB）是卡顿的来源
+                if s.buf_w != w || s.buf_h != h {
+                    if s.buf_w > 0 {
+                        let _ = DeleteObject(HGDIOBJ(s.buf_bmp.0));
+                        let _ = DeleteDC(s.buf_dc);
+                    }
+                    s.buf_dc = CreateCompatibleDC(Some(hdc));
+                    s.buf_bmp = CreateCompatibleBitmap(hdc, w, h);
+                    s.buf_w = w;
+                    s.buf_h = h;
+                }
+                let mem = s.buf_dc;
+                let old_bmp = SelectObject(mem, HGDIOBJ(s.buf_bmp.0));
 
                 let bg = if s.dynamic {
                     hsv((s.frame % 360) as u32, 0.45, 0.45)
@@ -240,8 +260,6 @@ fn paint(hwnd: HWND) {
 
                 let _ = BitBlt(hdc, 0, 0, w, h, Some(mem), 0, 0, SRCCOPY);
                 SelectObject(mem, old_bmp);
-                let _ = DeleteObject(HGDIOBJ(bmp.0));
-                let _ = DeleteDC(mem);
             }
             let _ = EndPaint(hwnd, &ps);
         }
@@ -320,6 +338,10 @@ unsafe extern "system" fn test_wnd_proc(
             }
             LRESULT(0)
         }
+        WM_ERASEBKGND => {
+            // 背景由 paint 整幅覆盖，不让系统先擦一遍（擦了就是一帧白闪）
+            LRESULT(1)
+        }
         WM_PAINT => {
             paint(hwnd);
             LRESULT(0)
@@ -356,6 +378,10 @@ unsafe extern "system" fn test_wnd_proc(
                     unsafe {
                         let _ = DeleteObject(HGDIOBJ(s.font_big.0));
                         let _ = DeleteObject(HGDIOBJ(s.font_mid.0));
+                        if s.buf_w > 0 {
+                            let _ = DeleteObject(HGDIOBJ(s.buf_bmp.0));
+                            let _ = DeleteDC(s.buf_dc);
+                        }
                     }
                 }
             });
