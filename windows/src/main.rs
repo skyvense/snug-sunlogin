@@ -31,14 +31,16 @@ use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
-    FillRect, GetDC, GetDeviceCaps, ReleaseDC, RoundRect, SelectObject, SetBkMode, SetTextColor,
+    FillRect, GetDC, GetDeviceCaps, InvalidateRect, ReleaseDC, RoundRect, SelectObject,
+    SetBkMode, SetTextColor,
     CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER,
     DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HBRUSH, HDC, HFONT, HGDIOBJ, LOGPIXELSX,
     OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, SetBkColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
-    InitCommonControlsEx, EM_SCROLLCARET, EM_SETSEL, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX,
+    DRAWITEMSTRUCT, InitCommonControlsEx, EM_SCROLLCARET, EM_SETSEL, ICC_LISTVIEW_CLASSES,
+    INITCOMMONCONTROLSEX,
     LVCOLUMNW, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVIF_TEXT, LVITEMW, LVM_DELETEALLITEMS,
     LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE,
     LVM_SETITEMTEXTW, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR,
