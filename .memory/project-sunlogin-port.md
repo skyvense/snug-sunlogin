@@ -87,3 +87,10 @@ metadata:
 - 新增 windows/src/guide.rs 独立窗口，三步带通：第 1 步检查（精确认 MttVDD 设备 + 当前虚拟屏/手机尺寸状态）→ 第 2 步安装（在本窗口内跑 setup-virtual-display.ps1 -NoPause，stdout 实时滚进正文，结束自动复查；失败给日志路径 + 重新安装）→ 第 3 步验证（调主程序 create_phone_screen 后轮询 20 秒，确认虚拟屏出现且 is_phone_mode，通过显示分辨率收官）。复用主窗口 mk_control（改 pub(crate)）与 create_phone_screen（改 pub(crate)）。
 - 三个入口：① 命令行 --guide（也认误写的 --guild）；② 正常启动时后台查一次驱动，缺失才 MessageBox 问要不要开向导（每次启动最多问一次）；③ 主窗口驱动组「配置向导」按钮（与「检查更新」并排，原整行改为两半）。驱动组提示文案改为「没屏先点『配置向导』一步步装；驱动只装一次」。
 - 编译教训（windows 0.59）：SendMessageW 的 wparam/lparam 是 Option 形式；EnableWindow 不在 WindowsAndMessaging 常用路径，按钮禁用改走 GetWindowLongW/SetWindowLongW 改 WS_DISABLED 位（guide.rs set_enabled）。
+
+### 2026-11-20 21:2x 界面与向导逻辑按机主反馈重排（已实现，CI 绿）
+- 主窗口删掉整个「驱动」组（安装 VDD/检查更新/配置向导按钮 + 提示全撤；更新仍靠启动静默查，驱动的事全归向导）。布局新顺序：状态区 → 显示器列表 → 操作行（刷新/创建/删除依次排开，仅手动模式出现，自动模式整行让掉、布局随模式切换即时重排）→ 手机屏组（只剩型号 + 自动/手动 + 说明）→ 测试组（改整宽）→ 日志。
+- 启动流程：状态区先挂「驱动检测中…」，每次启动都查 MttVDD（spawn_driver_check 回 WM_DRIVER_CHECKED），在就刷新状态，不在直接开向导——不再有 MessageBox 确认。--guide 仍可直接开。
+- 向导扩为五步走完闭环：检查 → 安装 → 创建验证 → 删除验证（remove_phone_screen 后轮询确认虚拟屏消失）→ 测试（重新创建 + testwin::open 把测试画面铺满虚拟屏，手机连进来看串流收官）。创建验证按 verify_for 分流（Create→删除步，Test→开测试窗）。
+- 测试窗口闪烁/不顺修复：窗口加 WS_CLIPCHILDREN（父窗口每帧 BitBlt 原先盖住顶部按钮逼其自绘）、WM_ERASEBKGND 返回 1 不擦背景、双缓冲后备位图改为缓存复用（原先每帧新建销毁 1080×2346 约 10MB 位图）。待机主真机确认按钮不再闪、动画更顺。
+- 教训重犯一次：同一消息块里并行发多个 muse.edit 会互相覆盖（快照式写入），WM_COMMAND 的一处编辑曾被同批后续编辑冲掉，靠 grep 才发现；依赖型编辑必须逐条发、逐条验。
