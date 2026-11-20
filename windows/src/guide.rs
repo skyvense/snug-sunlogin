@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{EM_SCROLLCARET, EM_SETSEL};
@@ -146,17 +146,27 @@ pub fn open(parent: HWND) {
     }
 }
 
+/// 启用/禁用按钮：windows 0.59 里 EnableWindow 不在常用路径下，直接改 WS_DISABLED 样式位
+fn set_enabled(hwnd: HWND, on: bool) {
+    unsafe {
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let new = if on {
+            style & !WS_DISABLED.0
+        } else {
+            style | WS_DISABLED.0
+        };
+        SetWindowLongW(hwnd, GWL_STYLE, new as i32);
+    }
+}
+
 fn set_action(label: &str, enabled: bool) {
-    let (action,) = GUIDE.with(|c| {
-        let cell = c.borrow();
-        (cell.as_ref().map(|s| s.action),)
-    });
+    let action = GUIDE.with(|c| c.borrow().as_ref().map(|s| s.action));
     if let Some(action) = action {
         let text_w = wide(label);
         unsafe {
             SetWindowTextW(action, PCWSTR(text_w.as_ptr()));
-            let _ = EnableWindow(action, enabled);
         }
+        set_enabled(action, enabled);
     }
 }
 
@@ -173,8 +183,13 @@ fn render_body() {
         unsafe {
             SetWindowTextW(body, PCWSTR(text_w.as_ptr()));
             let len = GetWindowTextLengthW(body);
-            SendMessageW(body, EM_SETSEL, WPARAM(len as usize), LPARAM(len as isize));
-            SendMessageW(body, EM_SCROLLCARET, WPARAM(0), LPARAM(0));
+            SendMessageW(
+                body,
+                EM_SETSEL,
+                Some(WPARAM(len as usize)),
+                Some(LPARAM(len as isize)),
+            );
+            SendMessageW(body, EM_SCROLLCARET, Some(WPARAM(0)), Some(LPARAM(0)));
         }
     }
 }
@@ -503,9 +518,7 @@ unsafe extern "system" fn guide_wnd_proc(
                 ID_CLOSE,
                 font_body,
             );
-            unsafe {
-                let _ = EnableWindow(action, false);
-            }
+            set_enabled(action, false);
             GUIDE.with(|c| {
                 *c.borrow_mut() = Some(GuideState {
                     hwnd,
