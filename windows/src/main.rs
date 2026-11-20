@@ -989,6 +989,7 @@ fn on_auto_toggled() {
             ui_log("主控已经连着，立即创建手机屏…");
             set_screen_owner(true);
             create_phone_screen();
+            open_launcher_on_virtual();
         }
     } else {
         ui_log("自动建屏：关（创建/移除手动点按钮）");
@@ -1029,6 +1030,37 @@ fn toggle_test_window() {
             }
         }
         None => ui_log("没有可用的显示器，先点「刷新显示器」"),
+    }
+}
+
+/// 主控连入后把资源库打开到虚拟屏上，手机一进来就是 App 首页。
+/// 已开着先关再开（可能开在别的屏上），确保落在虚拟屏；没虚拟屏就不开。
+fn open_launcher_on_virtual() {
+    let target = MAIN.with(|c| {
+        c.borrow()
+            .as_ref()
+            .and_then(|s| s.displays.iter().find(|d| d.is_virtual()).cloned())
+    });
+    match target {
+        Some(d) => {
+            let rect = windows::Win32::Foundation::RECT {
+                left: d.x,
+                top: d.y,
+                right: d.x + d.width as i32,
+                bottom: d.y + d.height as i32,
+            };
+            ui_log(&format!(
+                "自动打开资源库到虚拟屏 {}（{}×{}）",
+                d.device_name, d.width, d.height
+            ));
+            if launcher::is_open() {
+                launcher::close();
+            }
+            if let Err(e) = launcher::open(rect) {
+                ui_log(&format!("打开资源库失败：{e}"));
+            }
+        }
+        None => ui_log("虚拟屏没就绪，资源库暂不打开"),
     }
 }
 
@@ -1226,7 +1258,7 @@ unsafe extern "system" fn main_wnd_proc(
             let chk_auto = mk_control(
                 hwnd,
                 "Button",
-                "主控连入时自动建屏（断开自动移除）",
+                "主控连入时自动建屏并打开资源库（断开自动移除）",
                 base | WINDOW_STYLE(0x0003), // BS_AUTOCHECKBOX
                 0,
                 0,
@@ -1446,10 +1478,14 @@ unsafe extern "system" fn main_wnd_proc(
                     .map(|s| (s.auto_create, s.displays.iter().any(|d| d.is_virtual())))
                     .unwrap_or((false, false))
             });
-            if auto && !has_virtual {
-                ui_log("自动创建手机屏…");
-                set_screen_owner(true);
-                create_phone_screen();
+            if auto {
+                if !has_virtual {
+                    ui_log("自动创建手机屏…");
+                    set_screen_owner(true);
+                    create_phone_screen();
+                }
+                // 屏就绪后资源库也跟上：手机一连进来就是 App 首页，不用再点悬浮键
+                open_launcher_on_virtual();
             } else {
                 refresh_displays();
             }
@@ -1468,7 +1504,8 @@ unsafe extern "system" fn main_wnd_proc(
             });
             // 只拆自动建的：手动建的屏留给用户自己决定
             if auto && owned && has_virtual {
-                ui_log("自动移除手机屏…");
+                ui_log("自动关闭资源库并移除手机屏…");
+                launcher::close_all();
                 remove_phone_screen();
                 set_screen_owner(false);
             } else {
