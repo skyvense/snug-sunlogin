@@ -30,15 +30,18 @@ use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontW, GetDC, GetDeviceCaps, ReleaseDC, SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
-    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, HBRUSH, HDC, HFONT,
-    LOGPIXELSX, OUT_DEFAULT_PRECIS, TRANSPARENT,
+    BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
+    FillRect, GetDC, GetDeviceCaps, ReleaseDC, RoundRect, SelectObject, SetBkMode, SetTextColor,
+    CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER,
+    DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HBRUSH, HDC, HFONT, HGDIOBJ, LOGPIXELSX,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, SetBkColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
     InitCommonControlsEx, EM_SCROLLCARET, EM_SETSEL, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX,
     LVCOLUMNW, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVIF_TEXT, LVITEMW, LVM_DELETEALLITEMS,
-    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMTEXTW,
+    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE,
+    LVM_SETITEMTEXTW, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR,
     LVS_EX_DOUBLEBUFFER, LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -83,8 +86,11 @@ struct MainState {
 
     icon_box: HWND,
     detail: HWND,
-    grp_phone: HWND,
-    grp_test: HWND,
+    lbl_phone: HWND,
+    lbl_test: HWND,
+    /// 两张内容卡片的矩形（x, y, w, h），layout 时写入，WM_PAINT 据此画白卡片
+    card_phone: (i32, i32, i32, i32),
+    card_test: (i32, i32, i32, i32),
     combo_model: HWND,
     radio_auto: HWND,
     radio_manual: HWND,
@@ -163,7 +169,7 @@ fn run() -> i32 {
             hIcon: app_icon,
             lpszClassName: PCWSTR(class_w.as_ptr()),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hbrBackground: HBRUSH(6 as *mut core::ffi::c_void), // COLOR_WINDOW + 1
+            hbrBackground: bg_brush(), // 现代主题底色 #F5F5F7（theme 区）
             ..Default::default()
         };
         RegisterClassW(&wc);
@@ -273,6 +279,115 @@ pub(crate) fn mk_control(
     hwnd
 }
 
+// MARK: 现代主题（浅灰底 + 白卡片 + 品牌色按钮，替掉原生控件的系统灰）
+
+pub(crate) fn rgb(r: u32, g: u32, b: u32) -> COLORREF {
+    COLORREF(r | (g << 8) | (b << 16))
+}
+
+/// 窗口底色 #F5F5F7
+pub(crate) fn theme_bg() -> COLORREF {
+    rgb(245, 245, 247)
+}
+
+/// 卡片与输入区底色（纯白）
+pub(crate) fn theme_card() -> COLORREF {
+    rgb(255, 255, 255)
+}
+
+fn brush_of(color: COLORREF) -> HBRUSH {
+    unsafe { CreateSolidBrush(color) }
+}
+
+/// 全局画刷只建一次（进程生命周期，不释放）：0 = 底色刷，1 = 白刷
+fn theme_brush(which: usize) -> HBRUSH {
+    static BRUSHES: std::sync::OnceLock<[usize; 2]> = std::sync::OnceLock::new();
+    let arr = BRUSHES.get_or_init(|| {
+        [
+            brush_of(theme_bg()).0 as usize,
+            brush_of(theme_card()).0 as usize,
+        ]
+    });
+    HBRUSH(arr[which] as *mut core::ffi::c_void)
+}
+
+pub(crate) fn bg_brush() -> HBRUSH {
+    theme_brush(0)
+}
+
+pub(crate) fn card_brush() -> HBRUSH {
+    theme_brush(1)
+}
+
+/// 自绘按钮（主窗口与向导共用）：圆角、无系统灰。
+/// 主按钮（创建 / 向导的动作钮）品牌金橙，删除钮珊瑚红，其余白底描边。
+/// 闪烁相位走按钮的 GWLP_USERDATA（向导定时器写 0/1），相位 1 时主按钮描深色粗边。
+pub(crate) fn draw_button(dis: &DRAWITEMSTRUCT) {
+    let id = dis.CtlID as i32;
+    let state = dis.itemState.0;
+    let pressed = state & 0x0001 != 0; // ODS_SELECTED
+    let disabled = state & 0x0004 != 0; // ODS_DISABLED
+    let flash_on = unsafe { GetWindowLongW(dis.hwndItem, GWLP_USERDATA) } == 1;
+    let (fill, border, border_w, txt) = if disabled {
+        (rgb(240, 240, 242), rgb(230, 230, 233), 1, rgb(168, 168, 173))
+    } else if id == ID_CREATE || id == 3002 {
+        // 主按钮：品牌金橙 + 深棕字（与启动器选中态、应用图标同色）
+        let fill = if pressed || flash_on {
+            rgb(238, 156, 20)
+        } else {
+            rgb(255, 172, 42)
+        };
+        (fill, fill, if flash_on { 3 } else { 1 }, rgb(70, 44, 0))
+    } else if id == ID_REMOVE {
+        let fill = if pressed {
+            rgb(226, 90, 66)
+        } else {
+            rgb(243, 107, 83)
+        };
+        (fill, fill, 1, rgb(255, 255, 255))
+    } else {
+        let fill = if pressed {
+            rgb(240, 240, 244)
+        } else {
+            rgb(255, 255, 255)
+        };
+        (fill, rgb(209, 209, 214), 1, rgb(29, 29, 31))
+    };
+    let hdc = dis.hDC;
+    let rc = dis.rcItem;
+    unsafe {
+        let brush = CreateSolidBrush(fill);
+        let pen = CreatePen(PS_SOLID, border_w, border);
+        let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
+        let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+        let _ = RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 12, 12);
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        let _ = DeleteObject(HGDIOBJ(brush.0));
+        let _ = DeleteObject(HGDIOBJ(pen.0));
+        // 文字：用按钮自己的字体，居中绘制
+        let font = HFONT(
+            SendMessageW(dis.hwndItem, WM_GETFONT, Some(WPARAM(0)), Some(LPARAM(0))).0
+                as *mut core::ffi::c_void,
+        );
+        let old_font = SelectObject(hdc, HGDIOBJ(font.0));
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, txt);
+        let mut buf = [0u16; 128];
+        let n = GetWindowTextW(dis.hwndItem, &mut buf);
+        if n > 0 {
+            let mut rect = rc;
+            let _ = DrawTextW(
+                hdc,
+                &mut buf[..n as usize],
+                &mut rect as *mut _,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
+        }
+        SelectObject(hdc, old_font);
+    }
+}
+
 /// 建一个 UI 字体：高度按磅数 × DPI 换算（负数表示按字符高度匹配）。
 /// 注意 windows 0.59 里 CreateFontW 的 weight 是裸 i32、其余是类型化常量，别混。
 fn make_font(face: &str, points: i32, weight: i32, dpi: i32) -> HFONT {
@@ -320,7 +435,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.status,
                 s.detail,
                 s.list,
-                s.grp_phone,
+                s.lbl_phone,
                 s.btn_create,
                 s.btn_remove,
                 s.model_label,
@@ -328,7 +443,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.radio_auto,
                 s.radio_manual,
                 s.phone_hint,
-                s.grp_test,
+                s.lbl_test,
                 s.btn_test,
                 s.btn_launcher,
                 s.test_hint,
@@ -344,7 +459,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
         status,
         detail,
         list,
-        grp_phone,
+        lbl_phone,
         b_create,
         b_remove,
         model_label,
@@ -352,7 +467,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
         radio_auto,
         radio_manual,
         phone_hint,
-        grp_test,
+        lbl_test,
         b_test,
         b_launcher,
         test_hint,
@@ -401,45 +516,52 @@ fn layout_controls(client_w: i32, client_h: i32) {
             }
         }
     }
-    // 「手机屏」组：整宽，三行——型号下拉、自动/手动开关、说明
+    // 「手机屏」卡片：组名标签 + 型号下拉、自动/手动开关、说明（卡片本体在 WM_PAINT 画）
     let gy = list_bottom + row_h + sc(12);
-    let gh_phone = sc(108);
-    move_ctrl(grp_phone, m, gy, cw, gh_phone);
-    let inner = cw - sc(24);
-    move_ctrl(model_label, m + sc(12), gy + sc(22), sc(56), sc(20));
+    let gh_phone = sc(126);
+    move_ctrl(lbl_phone, m + sc(14), gy + sc(10), sc(200), sc(20));
+    let inner = cw - sc(28);
+    move_ctrl(model_label, m + sc(14), gy + sc(42), sc(56), sc(20));
     // 下拉框的矩形高含展开后的列表部分，收起时只占一行
     move_ctrl(
         combo_model,
-        m + sc(12) + sc(60),
-        gy + sc(19),
+        m + sc(14) + sc(60),
+        gy + sc(39),
         inner - sc(60),
         sc(180),
     );
     let radio_w = inner * 58 / 100;
-    move_ctrl(radio_auto, m + sc(12), gy + sc(54), radio_w, sc(22));
+    move_ctrl(radio_auto, m + sc(14), gy + sc(74), radio_w, sc(22));
     move_ctrl(
         radio_manual,
-        m + sc(12) + radio_w + sc(8),
-        gy + sc(54),
+        m + sc(14) + radio_w + sc(8),
+        gy + sc(74),
         inner - radio_w - sc(8),
         sc(22),
     );
-    move_ctrl(phone_hint, m + sc(12), gy + sc(82), inner, sc(18));
-    // 「测试」组：整宽（原与「驱动」并排，驱动组已去掉——驱动的事归配置向导）
-    let gh = sc(88);
+    move_ctrl(phone_hint, m + sc(14), gy + sc(102), inner, sc(18));
+    // 「测试」卡片：整宽
+    let gh = sc(108);
     let ry = gy + gh_phone + sc(12);
-    let inner2 = cw - sc(24);
+    let inner2 = cw - sc(28);
     let bw = (inner2 - sc(8)) / 2;
-    move_ctrl(grp_test, m, ry, cw, gh);
-    move_ctrl(b_test, m + sc(12), ry + sc(20), bw, sc(36));
+    move_ctrl(lbl_test, m + sc(14), ry + sc(10), sc(200), sc(20));
+    move_ctrl(b_test, m + sc(14), ry + sc(40), bw, sc(36));
     move_ctrl(
         b_launcher,
-        m + sc(12) + bw + sc(8),
-        ry + sc(20),
+        m + sc(14) + bw + sc(8),
+        ry + sc(40),
         inner2 - bw - sc(8),
         sc(36),
     );
-    move_ctrl(test_hint, m + sc(12), ry + sc(62), inner2, sc(18));
+    move_ctrl(test_hint, m + sc(14), ry + sc(84), inner2, sc(18));
+    // 卡片矩形存回状态，WM_PAINT 照此画白卡片
+    MAIN.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.card_phone = (m, gy, cw, gh_phone);
+            s.card_test = (m, ry, cw, gh);
+        }
+    });
     // 日志吃掉剩余高度
     let log_y = ry + gh + sc(12);
     move_ctrl(log_edit, m, log_y, cw, client_h - log_y - m);
@@ -1203,6 +1325,9 @@ fn relayout(hwnd: HWND) {
         let _ = GetClientRect(hwnd, &mut rc);
     }
     layout_controls(rc.right - rc.left, rc.bottom - rc.top);
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, false);
+    }
 }
 
 // MARK: 窗口过程
@@ -1223,9 +1348,12 @@ unsafe extern "system" fn main_wnd_proc(
             }
             let ui_font = make_font("Microsoft YaHei UI", 10, 400, dpi);
             let status_font = make_font("Microsoft YaHei UI", 12, 600, dpi);
+            let grp_font = make_font("Microsoft YaHei UI", 11, 600, dpi);
             let log_font = make_font("Consolas", 10, 400, dpi);
+            // 自绘按钮样式（BS_OWNERDRAW）：按钮长相由 draw_button 统一画，去掉系统灰
+            let btn_style = base | WINDOW_STYLE(0x0000_000B);
             // 控件先随手建在占位尺寸上，建完统一走 layout_controls 摆位。
-            // 顺序有讲究：分组框要先于组内的按钮建，边框才不会盖住按钮。
+            // 分组不再用原生分组框：父窗口在 WM_PAINT 里画白色卡片，组名只是一个粗体标签。
             let icon_box = mk_control(
                 hwnd,
                 "Static",
@@ -1283,22 +1411,42 @@ unsafe extern "system" fn main_wnd_proc(
             let model =
                 phones::model_by_id(&saved.phone_model_id).unwrap_or_else(phones::standard_model);
             phones::set_current_model(&model);
-            let grp_phone = mk_control(
+            let lbl_phone = mk_control(
                 hwnd,
-                "Button",
+                "Static",
                 "手机屏",
-                base | WINDOW_STYLE(0x0000_0007), // BS_GROUPBOX
+                base,
                 0,
                 0,
                 10,
                 10,
                 9010,
+                grp_font,
+            );
+            let btn_create = mk_control(
+                hwnd,
+                "Button",
+                "创建手机屏",
+                btn_style,
+                0,
+                0,
+                10,
+                10,
+                ID_CREATE,
                 ui_font,
             );
-            let btn_create =
-                mk_control(hwnd, "Button", "创建手机屏", base, 0, 0, 10, 10, ID_CREATE, ui_font);
-            let btn_remove =
-                mk_control(hwnd, "Button", "移除手机屏", base, 0, 0, 10, 10, ID_REMOVE, ui_font);
+            let btn_remove = mk_control(
+                hwnd,
+                "Button",
+                "移除手机屏",
+                btn_style,
+                0,
+                0,
+                10,
+                10,
+                ID_REMOVE,
+                ui_font,
+            );
             let phone_hint = mk_control(
                 hwnd,
                 "Static",
@@ -1389,22 +1537,42 @@ unsafe extern "system" fn main_wnd_proc(
                     None,
                 );
             }
-            let grp_test = mk_control(
+            let lbl_test = mk_control(
                 hwnd,
-                "Button",
+                "Static",
                 "测试",
-                base | WINDOW_STYLE(0x0000_0007), // BS_GROUPBOX
+                base,
                 0,
                 0,
                 10,
                 10,
                 9012,
+                grp_font,
+            );
+            let btn_test = mk_control(
+                hwnd,
+                "Button",
+                "测试窗口",
+                btn_style,
+                0,
+                0,
+                10,
+                10,
+                ID_TEST,
                 ui_font,
             );
-            let btn_test =
-                mk_control(hwnd, "Button", "测试窗口", base, 0, 0, 10, 10, ID_TEST, ui_font);
-            let btn_launcher =
-                mk_control(hwnd, "Button", "启动器", base, 0, 0, 10, 10, ID_LAUNCHER, ui_font);
+            let btn_launcher = mk_control(
+                hwnd,
+                "Button",
+                "启动器",
+                btn_style,
+                0,
+                0,
+                10,
+                10,
+                ID_LAUNCHER,
+                ui_font,
+            );
             let test_hint = mk_control(
                 hwnd,
                 "Static",
@@ -1417,8 +1585,39 @@ unsafe extern "system" fn main_wnd_proc(
                 9013,
                 ui_font,
             );
-            let btn_refresh =
-                mk_control(hwnd, "Button", "刷新显示器", base, 0, 0, 10, 10, ID_REFRESH, ui_font);
+            let btn_refresh = mk_control(
+                hwnd,
+                "Button",
+                "刷新显示器",
+                btn_style,
+                0,
+                0,
+                10,
+                10,
+                ID_REFRESH,
+                ui_font,
+            );
+            // 列表配色跟着主题走：白底深字（原生默认也是白底，这里把文字色钉死）
+            unsafe {
+                SendMessageW(
+                    list,
+                    LVM_SETBKCOLOR,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(theme_card().0 as isize)),
+                );
+                SendMessageW(
+                    list,
+                    LVM_SETTEXTBKCOLOR,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(theme_card().0 as isize)),
+                );
+                SendMessageW(
+                    list,
+                    LVM_SETTEXTCOLOR,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(rgb(29, 29, 31).0 as isize)),
+                );
+            }
             let log_edit = mk_control(
                 hwnd,
                 "Edit",
@@ -1443,8 +1642,10 @@ unsafe extern "system" fn main_wnd_proc(
                     btn_launcher,
                     icon_box,
                     detail,
-                    grp_phone,
-                    grp_test,
+                    lbl_phone,
+                    lbl_test,
+                    card_phone: (0, 0, 0, 0),
+                    card_test: (0, 0, 0, 0),
                     combo_model,
                     radio_auto,
                     radio_manual,
@@ -1517,40 +1718,107 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
+        WM_PAINT => {
+            // 现代主题的底：整幅刷浅灰，再把两张内容卡片画成白底圆角描边
+            let (cp, ct) = MAIN.with(|c| {
+                c.borrow()
+                    .as_ref()
+                    .map(|s| (s.card_phone, s.card_test))
+                    .unwrap_or(((0, 0, 0, 0), (0, 0, 0, 0)))
+            });
+            unsafe {
+                let mut ps = PAINTSTRUCT::default();
+                let hdc = BeginPaint(hwnd, &mut ps);
+                let mut rc = windows::Win32::Foundation::RECT::default();
+                let _ = GetClientRect(hwnd, &mut rc);
+                FillRect(hdc, &rc, bg_brush());
+                for (x, y, w, h) in [cp, ct] {
+                    if w > 0 && h > 0 {
+                        let brush = CreateSolidBrush(theme_card());
+                        let pen = CreatePen(PS_SOLID, 1, rgb(226, 226, 231));
+                        let ob = SelectObject(hdc, HGDIOBJ(brush.0));
+                        let op = SelectObject(hdc, HGDIOBJ(pen.0));
+                        let _ = RoundRect(hdc, x, y, x + w, y + h, 14, 14);
+                        SelectObject(hdc, ob);
+                        SelectObject(hdc, op);
+                        let _ = DeleteObject(HGDIOBJ(brush.0));
+                        let _ = DeleteObject(HGDIOBJ(pen.0));
+                    }
+                }
+                let _ = EndPaint(hwnd, &mut ps);
+            }
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1), // 背景由 WM_PAINT 整幅画，不先擦（免得露灰）
+        WM_DRAWITEM => {
+            let dis = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+            draw_button(dis);
+            LRESULT(1)
+        }
         WM_CTLCOLORSTATIC => {
-            // 状态标题按级别上色（就绪绿、待处理橙），说明行固定灰色；其余静态文字走默认。
-            // kind：Some(Some(级别)) 是标题、Some(None) 是说明行、None 与我无关。
+            // 静态文字配色：状态标题按级别（就绪绿、待处理橙），说明/提示次灰，
+            // 组名与标签深色；底刷按所在区域给（顶区用底色刷、卡片内用白刷），不再发灰。
             let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
             let ctrl = HWND(lparam.0 as *mut core::ffi::c_void);
-            let kind = MAIN.with(|c| {
+            // kind：0 无关、1 状态标题、2 次灰、3 深色
+            let (kind, level, on_card) = MAIN.with(|c| {
                 let cell = c.borrow();
-                cell.as_ref().and_then(|s| {
-                    if s.status == ctrl {
-                        Some(Some(s.status_level))
-                    } else if s.detail == ctrl {
-                        Some(None)
-                    } else {
-                        None
+                match cell.as_ref() {
+                    Some(s) => {
+                        if s.status == ctrl {
+                            (1, s.status_level, false)
+                        } else if s.detail == ctrl {
+                            (2, s.status_level, false)
+                        } else if s.phone_hint == ctrl || s.test_hint == ctrl {
+                            (2, s.status_level, true)
+                        } else if s.lbl_phone == ctrl
+                            || s.lbl_test == ctrl
+                            || s.model_label == ctrl
+                        {
+                            (3, s.status_level, true)
+                        } else {
+                            (0, s.status_level, false)
+                        }
                     }
-                })
-            });
-            match kind {
-                Some(level) => {
-                    let color = match level {
-                        Some(StatusLevel::Ready) => COLORREF(0x003D7A1F),
-                        Some(StatusLevel::Warn) => COLORREF(0x00006A9C),
-                        Some(StatusLevel::Neutral) => COLORREF(0x00000000),
-                        None => COLORREF(0x00606060),
-                    };
-                    unsafe {
-                        SetTextColor(hdc, color);
-                        SetBkMode(hdc, TRANSPARENT);
-                    }
-                    // 返回与窗口背景同款的画刷（COLOR_WINDOW + 1），免得文字底色发灰
-                    LRESULT(6)
+                    None => (0, StatusLevel::Neutral, false),
                 }
-                None => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+            });
+            if kind == 0 {
+                return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
             }
+            let color = match (kind, level) {
+                (1, StatusLevel::Ready) => rgb(31, 122, 61),
+                (1, StatusLevel::Warn) => rgb(156, 106, 0),
+                (2, _) => rgb(110, 110, 115),
+                _ => rgb(29, 29, 31),
+            };
+            unsafe {
+                SetTextColor(hdc, color);
+                SetBkMode(hdc, TRANSPARENT);
+            }
+            LRESULT(if on_card {
+                card_brush().0 as isize
+            } else {
+                bg_brush().0 as isize
+            })
+        }
+        WM_CTLCOLORBTN => {
+            // 单选钮（自绘按钮不走这里）：深色字、白底，与卡片融为一体
+            let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
+            unsafe {
+                SetTextColor(hdc, rgb(29, 29, 31));
+                SetBkMode(hdc, TRANSPARENT);
+            }
+            LRESULT(card_brush().0 as isize)
+        }
+        WM_CTLCOLOREDIT => {
+            // 日志框：白底深字
+            let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
+            unsafe {
+                SetTextColor(hdc, rgb(29, 29, 31));
+                SetBkColor(hdc, theme_card());
+            }
+            LRESULT(card_brush().0 as isize)
         }
         WM_DPICHANGED => {
             // 拖到不同 DPI 的屏上：更新缩放系数并按系统建议的新尺寸摆好
