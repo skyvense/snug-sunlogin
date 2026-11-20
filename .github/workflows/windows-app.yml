@@ -36,7 +36,11 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item windows/target/x86_64-pc-windows-msvc/release/SnugWindows.exe dist/
           Copy-Item windows/scripts/setup-virtual-display.ps1 dist/
+          Copy-Item windows/README.md dist/
           Copy-Item windows/SPIKE.md dist/
+          # 随包驱动与 nefcon（与发布 zip 同布局）：脚本优先用随包的，不依赖下载
+          Copy-Item windows/assets/vdd dist/vdd -Recurse
+          Copy-Item windows/assets/nefcon dist/nefcon -Recurse
 
       - uses: actions/upload-artifact@v4
         with:
