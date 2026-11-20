@@ -168,6 +168,28 @@ pub fn has_phone_resolution(text: &str) -> bool {
         .any(|&(s, e)| is_phone_block(&text[s..e]))
 }
 
+/// 配置里现有的分辨率一览（如 "1920×1080@144、1080×2346@60"），给日志取证用：
+/// 解析口径和增删手术完全一致——日志里说没有，手术就一定也找不到。
+pub fn resolution_summary(text: &str) -> String {
+    let blocks = resolution_blocks(text);
+    if blocks.is_empty() {
+        return "（一条分辨率都没有）".to_string();
+    }
+    blocks
+        .iter()
+        .map(|&(s, e)| {
+            let b = &text[s..e];
+            let one = |tag: &str| {
+                extract_uint(b, tag)
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "?".to_string())
+            };
+            format!("{}×{}@{}", one("width"), one("height"), one("refresh_rate"))
+        })
+        .collect::<Vec<_>>()
+        .join("、")
+}
+
 const PHONE_BLOCK: &str = "<resolution>\n            <width>1080</width>\n            <height>2346</height>\n            <refresh_rate>60</refresh_rate>\n        </resolution>";
 
 /// 加上手机屏分辨率这一条（已有则不动）。返回新文本。
@@ -274,6 +296,14 @@ mod tests {
         assert!(!has_phone_resolution(&back));
         assert!(back.contains("<width>1920</width>"));
         assert_eq!(get_count(&back), Some(2));
+    }
+
+    #[test]
+    fn resolution_summary_lists_blocks() {
+        assert_eq!(resolution_summary(SAMPLE), "1920×1080@144");
+        let doc = add_phone_resolution(SAMPLE);
+        assert_eq!(resolution_summary(&doc), "1920×1080@144、1080×2346@60");
+        assert_eq!(resolution_summary("<vdd_settings/>"), "（一条分辨率都没有）");
     }
 
     #[test]

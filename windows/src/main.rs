@@ -642,6 +642,37 @@ fn restart_vdd_device() -> bool {
     }
 }
 
+/// 对 VDD 设备做一个 pnputil 动作（启用/禁用）并记日志。没找到设备或枚举失败返回 false。
+fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
+    match devices::display_adapters() {
+        Ok(list) => match devices::find_vdd(&list) {
+            Some(dev) => {
+                ui_log(&format!(
+                    "{verb} VDD 设备：{}（{}，状态 {}）",
+                    dev.friendly_name, dev.instance_id, dev.status
+                ));
+                let (exit, output) = action(&dev.instance_id);
+                ui_log(&format!("pnputil 退出码 {exit}"));
+                if exit != 0 {
+                    let tail: Vec<&str> = output.lines().rev().take(3).collect();
+                    for line in tail.iter().rev() {
+                        ui_log(&format!("  {line}"));
+                    }
+                }
+                exit == 0
+            }
+            None => {
+                ui_log("没找到 VDD 显示适配器（驱动没装？）");
+                false
+            }
+        },
+        Err(e) => {
+            ui_log(&e);
+            false
+        }
+    }
+}
+
 fn create_phone_screen() {
     ui_log("—— 创建手机屏 ——");
     let mut state = vdd::load_state();
@@ -681,6 +712,9 @@ fn create_phone_screen() {
         ui_log("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（原文件备份为 .snug-pristine.bak）");
     }
 
+    // 移除手机屏会把设备禁用：先启用回来（本就启用时重复启用无害，成败只记日志，
+    // 后面的重启设备自带 disable+enable 兜底，不在这里中断）
+    vdd_device_action("启用", devices::enable_device);
     if !restart_vdd_device() {
         return;
     }
@@ -749,6 +783,14 @@ fn remove_phone_screen() {
     } else if vdd::settings_exists() {
         match vdd::load_settings() {
             Ok(text) => {
+                // 先把配置现状打进日志：解析口径和下面的手术一致，删没删掉当场对得上账
+                ui_log(&format!(
+                    "配置现状：count={}，分辨率：{}",
+                    vdd::get_count(&text)
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "读不到".to_string()),
+                    vdd::resolution_summary(&text)
+                ));
                 let (mut text, removed) = vdd::remove_phone_resolution(&text);
                 if removed > 0 {
                     ui_log(&format!("已从配置删掉 {removed} 条手机屏分辨率"));
@@ -773,11 +815,25 @@ fn remove_phone_screen() {
         ui_log("没有配置文件，无需恢复");
     }
     vdd::clear_state();
-    if restart_vdd_device() {
+    // 配置改回去还不够：MttVDD 只要设备启用着就一直挂着这块屏（count 恢复成 1 也还有一块），
+    // 必须禁用设备它才真的消失；下次创建会先启用回来。
+    if vdd_device_action("禁用", devices::disable_device) {
         wait_pump(1500);
     }
     refresh_displays();
-    ui_log("移除完成（原始配置的完整备份仍在 vdd_settings.xml.snug-pristine.bak）");
+    ui_log("（原始配置的完整备份仍在 vdd_settings.xml.snug-pristine.bak）");
+    // 以枚举结果为准下结论，不无条件报「移除完成」
+    let still_there = MAIN.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|s| s.displays.iter().any(|d| d.is_virtual()))
+            .unwrap_or(false)
+    });
+    if still_there {
+        ui_log("⚠ 移除后虚拟屏还在（禁用没生效？）——把这段日志贴回主会话");
+    } else {
+        ui_log("移除完成：虚拟屏已消失（下次点「创建手机屏」会自动重新启用驱动）");
+    }
 }
 
 /// 挑目标屏：手机屏模式的虚拟屏 > 虚拟屏 > 主屏 > 第一块。
@@ -951,7 +1007,7 @@ unsafe extern "system" fn main_wnd_proc(
             let phone_hint = mk_control(
                 hwnd,
                 "Static",
-                "向日葵中增加一块竖屏 · 1080×2346，创建/移除会自动改配置并重启驱动",
+                "向日葵中增加一块竖屏 · 1080×2346；移除会禁用驱动，创建时重新启用",
                 base,
                 0,
                 0,

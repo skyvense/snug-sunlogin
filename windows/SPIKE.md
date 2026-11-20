@@ -29,8 +29,8 @@
    它的窗口全屏到虚拟屏、资源库收起、左上角出现悬浮「App」键；②点悬浮键 →
    资源库重开；③「全部」页点一个没运行的 App → 打开后自动全屏过来（等几秒）；
    ④搜索框输名字 → 列表跟着过滤。
-7. 测完点主窗口「移除手机屏」恢复原配置（原配置备份在
-   `C:\VirtualDisplayDriver\vdd_settings.xml.snug-pristine.bak`）。
+7. 测完点主窗口「移除手机屏」：恢复配置并禁用 VDD 设备，虚拟屏应从列表里消失
+   （原配置备份在 `C:\VirtualDisplayDriver\vdd_settings.xml.snug-pristine.bak`）。
 
 ## 五个未知数（逐项打勾）
 

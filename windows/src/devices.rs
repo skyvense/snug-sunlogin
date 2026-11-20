@@ -102,6 +102,17 @@ pub fn find_vdd(devices: &[PnpDevice]) -> Option<&PnpDevice> {
     })
 }
 
+/// 禁用设备：移除手机屏时用。MttVDD 只要设备还启用着，就会按配置一直挂着一块屏，
+/// 光改配置（删分辨率、恢复 count）删不掉它；禁用后它才真的从桌面上消失。
+pub fn disable_device(instance_id: &str) -> (i32, String) {
+    run("pnputil.exe", &["/disable-device", instance_id])
+}
+
+/// 启用设备：创建手机屏时先把移除时禁用的设备启用回来。本就启用时重复启用无害。
+pub fn enable_device(instance_id: &str) -> (i32, String) {
+    run("pnputil.exe", &["/enable-device", instance_id])
+}
+
 /// 重启设备让 VDD 重新读配置。有的版本上 restart 不被支持，退而求其次 disable 再 enable。
 /// 返回最后一步的 (退出码, 输出)。
 pub fn restart_device(instance_id: &str) -> (i32, String) {
