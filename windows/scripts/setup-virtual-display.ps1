@@ -1,0 +1,581 @@
+﻿# 搞通 Windows 虚拟屏：盘点 + 修复 + 验证，一条龙。
+#
+# 背景：Virtual Display Driver（VDD / MttVDD）的 winget 包「装成功」也可能只是把
+# 驱动文件放进了驱动仓库，真正的虚拟显示设备节点（Root\MttVDD）没有被创建出来，
+# 于是设备管理器里看不到适配器、桌面上也不会多出虚拟屏。本脚本按层排查并逐层补：
+#   1) 环境：VC++ 运行时（驱动加载依赖 vcruntime140.dll）、内存完整性状态；
+#   2) 盘点：所有显示适配器（含别人家的 Idd 驱动，只看不动）、当前真实枚举到的显示器；
+#   3) 驱动包：不在驱动仓库就从官方 GitHub 发布下载并 pnputil 装入；
+#   4) 设备节点：不存在就用 SetupAPI 程序化创建（devcon install 的等价做法）；
+#   5) 配置：保证 vdd_settings.xml 里有 1080×2346@60 且 monitors/count ≥ 1；
+#   6) 生效验证：重启 VDD 设备，轮询确认虚拟屏真的出现在桌面上，并把分辨率设到手机屏尺寸。
+# 不管机器上装没装过其他 Idd 驱动（向日葵的 OrayIddDriver 等）都能跑：别人的驱动只盘点、不碰。
+#
+# 用法：双击或在 PowerShell 里运行本脚本（会自动提权）；-NoPause 结尾不暂停。
+# 全程日志写到脚本同目录的 setup-virtual-display.log，排障时把这个文件发出来即可。
+param([switch]$NoPause)
+
+$ErrorActionPreference = 'Continue'
+$script:LogPath = Join-Path $PSScriptRoot 'setup-virtual-display.log'
+$script:ExitCode = 0
+
+function Log([string]$msg) {
+    $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $msg
+    Write-Host $line
+    Add-Content -Path $script:LogPath -Value $line -Encoding UTF8
+}
+
+function Section([string]$title) {
+    Log ''
+    Log "===== $title ====="
+}
+
+# ---- 提权：建设备节点、装驱动、重启设备都要管理员 ----
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host '需要管理员权限，正在以管理员身份重新启动…（弹出的 UAC 请点「是」）'
+    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    if ($NoPause) { $argList += ' -NoPause' }
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $argList
+    exit
+}
+
+Log 'Snug for Sunlogin — Windows 虚拟屏一键搞通脚本'
+Log "机器：$env:COMPUTERNAME，用户：$env:USERNAME"
+
+# ---- C# 助手：显示器枚举/改分辨率（user32）+ 程序化建设备节点（setupapi/newdev） ----
+if (-not ('SnugWinDisplay' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class SnugWinDisplay
+{
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DISPLAY_DEVICE
+    {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+        public int StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DEVMODE
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+        public short dmSpecVersion;
+        public short dmDriverVersion;
+        public short dmSize;
+        public short dmDriverExtra;
+        public int dmFields;
+        public int dmPositionX;
+        public int dmPositionY;
+        public int dmDisplayOrientation;
+        public int dmDisplayFixedOutput;
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+        public short dmLogPixels;
+        public int dmBitsPerPel;
+        public int dmPelsWidth;
+        public int dmPelsHeight;
+        public int dmDisplayFlags;
+        public int dmDisplayFrequency;
+        public int dmICMMethod;
+        public int dmICMIntent;
+        public int dmMediaType;
+        public int dmDitherType;
+        public int dmReserved1;
+        public int dmReserved2;
+        public int dmPanningWidth;
+        public int dmPanningHeight;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern bool EnumDisplayDevices(string lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern bool EnumDisplaySettings(string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int ChangeDisplaySettingsEx(string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd, int dwflags, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int ChangeDisplaySettingsEx(string lpszDeviceName, IntPtr lpDevMode, IntPtr hwnd, int dwflags, IntPtr lParam);
+
+    const int ENUM_CURRENT_SETTINGS = -1;
+    const int CDS_UPDATEREGISTRY = 0x00000001;
+    const int DM_PELSWIDTH = 0x00080000;
+    const int DM_PELSHEIGHT = 0x00100000;
+    const int DM_DISPLAYFREQUENCY = 0x00400000;
+
+    // 每行一个显示器：DeviceName \t DeviceString \t attached(0/1) \t primary(0/1) \t WxH@Hz
+    public static string[] ListDisplays()
+    {
+        var lines = new List<string>();
+        for (uint i = 0; ; i++)
+        {
+            var dd = new DISPLAY_DEVICE();
+            dd.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+            if (!EnumDisplayDevices(null, i, ref dd, 0)) break;
+            bool attached = (dd.StateFlags & 0x1) != 0;
+            bool primary = (dd.StateFlags & 0x4) != 0;
+            string mode = "";
+            if (attached)
+            {
+                var dm = new DEVMODE();
+                dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+                if (EnumDisplaySettings(dd.DeviceName, ENUM_CURRENT_SETTINGS, ref dm))
+                    mode = dm.dmPelsWidth + "x" + dm.dmPelsHeight + "@" + dm.dmDisplayFrequency;
+            }
+            lines.Add(dd.DeviceName + "\t" + dd.DeviceString + "\t" + (attached ? "1" : "0") + "\t" + (primary ? "1" : "0") + "\t" + mode);
+        }
+        return lines.ToArray();
+    }
+
+    // 与 app 里 display.rs 的 set_mode 同口径：写注册表 + 再发一次空调用提交。
+    public static int SetMode(string deviceName, int width, int height, int hz)
+    {
+        var dm = new DEVMODE();
+        dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+        dm.dmPelsWidth = width;
+        dm.dmPelsHeight = height;
+        dm.dmDisplayFrequency = hz;
+        dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+        int ret = ChangeDisplaySettingsEx(deviceName, ref dm, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero);
+        if (ret == 0)
+            ChangeDisplaySettingsEx(deviceName, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
+        return ret;
+    }
+}
+
+public static class SnugWinDevNode
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SP_DEVINFO_DATA
+    {
+        public uint cbSize;
+        public Guid ClassGuid;
+        public uint DevInst;
+        public IntPtr Reserved;
+    }
+
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr SetupDiCreateDeviceInfoList(ref Guid ClassGuid, IntPtr hwndParent);
+
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool SetupDiCreateDeviceInfo(IntPtr DeviceInfoSet, string DeviceName, ref Guid ClassGuid, string DeviceDescription, IntPtr hwndParent, uint CreationFlags, ref SP_DEVINFO_DATA DeviceInfoData);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern bool SetupDiSetDeviceRegistryProperty(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, uint Property, byte[] PropertyBuffer, uint PropertyBufferSize);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern bool SetupDiCallClassInstaller(uint InstallFunction, IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
+
+    [DllImport("newdev.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool UpdateDriverForPlugAndPlayDevices(IntPtr hwndParent, string HardwareId, string FullInfPath, uint InstallFlags, out bool bRebootRequired);
+
+    const uint DICD_GENERATE_ID = 0x00000001;
+    const uint SPDRP_HARDWAREID = 0x00000001;
+    const uint DIF_REGISTERDEVICE = 0x00000019;
+    const uint INSTALLFLAG_FORCE = 0x00000001;
+
+    // 等价于 devcon install <inf> Root\MttVDD：建根设备节点并绑定驱动。
+    public static string CreateRootDevice(string deviceName, string hardwareId, string infPath, string description)
+    {
+        Guid classGuid = new Guid("{4d36e968-e325-11ce-bfc1-08002be10318}"); // 显示类
+        IntPtr set = SetupDiCreateDeviceInfoList(ref classGuid, IntPtr.Zero);
+        if (set == IntPtr.Zero || set == new IntPtr(-1))
+            return "SetupDiCreateDeviceInfoList 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+        try
+        {
+            var data = new SP_DEVINFO_DATA();
+            data.cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVINFO_DATA));
+            if (!SetupDiCreateDeviceInfo(set, deviceName, ref classGuid, description, IntPtr.Zero, DICD_GENERATE_ID, ref data))
+                return "SetupDiCreateDeviceInfo 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+            byte[] buf = System.Text.Encoding.Unicode.GetBytes(hardwareId + "\0\0");
+            if (!SetupDiSetDeviceRegistryProperty(set, ref data, SPDRP_HARDWAREID, buf, (uint)buf.Length))
+                return "SetupDiSetDeviceRegistryProperty 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+            if (!SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, ref data))
+                return "DIF_REGISTERDEVICE 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+        }
+        finally
+        {
+            SetupDiDestroyDeviceInfoList(set);
+        }
+        bool reboot;
+        if (!UpdateDriverForPlugAndPlayDevices(IntPtr.Zero, hardwareId, infPath, INSTALLFLAG_FORCE, out reboot))
+            return "UpdateDriverForPlugAndPlayDevices 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+        return reboot ? "OK（需要重启）" : "OK";
+    }
+}
+'@
+}
+
+function Get-DisplayList {
+    [SnugWinDisplay]::ListDisplays() | ForEach-Object {
+        $p = $_ -split "`t"
+        [pscustomobject]@{
+            Name     = $p[0]
+            Desc     = $p[1]
+            Attached = ($p[2] -eq '1')
+            Primary  = ($p[3] -eq '1')
+            Mode     = $p[4]
+        }
+    }
+}
+
+function Test-IsVirtual([object]$d) {
+    return ($d.Desc -match 'Virtual|MttVDD|Idd|Indirect') -or ($d.Name -match 'Virtual|MttVDD')
+}
+
+function Get-ProblemCode([string]$instanceId) {
+    try {
+        $p = Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_ProblemCode' -ErrorAction Stop
+        return $p.Data
+    } catch { return $null }
+}
+
+function Get-HardwareIds([string]$instanceId) {
+    try {
+        $p = Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction Stop
+        return @($p.Data)
+    } catch { return @() }
+}
+
+# 按硬件 ID 找 VDD 设备（不看名字，什么语言的系统都一样）；先查显示类，再兜底扫 ROOT\* 设备。
+function Find-VddDevice {
+    $candidates = @()
+    $candidates += Get-PnpDevice -Class Display -ErrorAction SilentlyContinue
+    $candidates += Get-PnpDevice -ErrorAction SilentlyContinue |
+        Where-Object { $_.InstanceId -like 'ROOT\*' -and $_.Class -ne 'Display' }
+    foreach ($dev in ($candidates | Sort-Object InstanceId -Unique)) {
+        if ((Get-HardwareIds $dev.InstanceId) -contains 'Root\MttVDD') { return $dev }
+    }
+    return $null
+}
+
+# ================= 一、环境 =================
+Section '一、环境'
+$os = Get-CimInstance Win32_OperatingSystem
+Log "系统：$($os.Caption)（Build $($os.BuildNumber)）"
+if (Test-Path "$env:SystemRoot\System32\vcruntime140.dll") {
+Log 'VC++ 运行时：vcruntime140.dll 在'
+} else {
+Log 'VC++ 运行时：缺 vcruntime140.dll——VDD 驱动依赖它，缺了会加载失败。尝试用 winget 安装 VC++ 2015-2022 x64…'
+winget install --id Microsoft.VCRedist.2015+.x64 -e --accept-source-agreements --accept-package-agreements 2>&1 |
+ForEach-Object { Log " winget: $_"}
+}
+$hvci = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -ErrorAction SilentlyContinue).Enabled
+if ($hvci -eq 1) { Log '内存完整性（内核隔离）：开启。若后面出现签名类问题码 52，先考虑它（本脚本只报告、不替你关）'}
+elseif ($hvci -eq 0) { Log '内存完整性（内核隔离）：关闭'}
+else { Log '内存完整性（内核隔离）：状态未知'}
+
+# ================= 二、盘点 =================
+Section '二、盘点现有显示设备（别人的 Idd 驱动只看不动）'
+foreach ($a in (Get-PnpDevice -Class Display -ErrorAction SilentlyContinue)) {
+$pc = Get-ProblemCode $a.InstanceId
+Log "适配器：$($a.FriendlyName) | 状态 $($a.Status) | 问题码 $pc | $($a.InstanceId)"
+if ($a.InstanceId -notlike 'PCI\*' -and $a.FriendlyName -notmatch 'Intel|AMD|NVIDIA|GeForce|Radeon') {
+Log ' ↑ 虚拟/Idd 类适配器（不是物理显卡），只盘点、不动它'
+}
+}
+foreach ($mo in (Get-PnpDevice -Class Monitor -ErrorAction SilentlyContinue)) {
+Log "显示器：$($mo.FriendlyName) | 状态 $($mo.Status) | $($mo.InstanceId)"
+}
+foreach ($d in (Get-DisplayList)) {
+Log "桌面显示：$($d.Name) | $($d.Desc) | 已接入=$($d.Attached) 主屏=$($d.Primary) | 当前 $($d.Mode)"
+}
+
+# ================= 三、驱动包 =================
+Section '三、VDD 驱动包（MttVDD.inf）'
+$infPath = $null
+$staged = Get-ChildItem "$env:SystemRoot\INF\oem*.inf" -ErrorAction SilentlyContinue |
+Select-String -List -Pattern 'MttVDD' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($staged) {
+$infPath = $staged.Path
+Log "驱动包已在驱动仓库里：$infPath"
+}
+$diskInf = $null
+foreach ($root in @('C:\VirtualDisplayDriver', "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", $env:ProgramFiles, "$env:USERPROFILE\Downloads")) {
+if (-not $diskInf -and (Test-Path $root)) {
+$diskInf = Get-ChildItem $root -Recurse -Filter 'MttVDD.inf' -Depth 4 -ErrorAction SilentlyContinue |
+Select-Object -First 1
+}
+}
+if ($diskInf) {
+Log "磁盘上找到原始 INF：$($diskInf.FullName)"
+$infPath = $diskInf.FullName
+}
+if (-not $infPath) {
+Log '驱动仓库和磁盘上都没有 MttVDD.inf：从官方 GitHub 发布下载驱动包…'
+try {
+$rel = Invoke-RestMethod 'https://api.github.com/repos/VirtualDrivers/Virtual-Display-Driver/releases/latest' -Headers @{ 'User-Agent' = 'SnugSetup'} -TimeoutSec 30
+Log "官方最新版：$($rel.tag_name)"
+$asset = $rel.assets | Where-Object { $_.name -match '\.zip$' -and $_.name -notmatch 'Control'} |
+Sort-Object { if ($_.name -match 'Driver') { 0} else { 1}} | Select-Object -First 1
+if ($asset) {
+Log "下载 $($asset.name)…"
+$zip = Join-Path $env:TEMP 'vdd-driver.zip'
+$dst = Join-Path $env:TEMP 'vdd-driver'
+Invoke-WebRequest $asset.browser_download_url -OutFile $zip -TimeoutSec 300
+if (Test-Path $dst) { Remove-Item $dst -Recurse -Force}
+Expand-Archive $zip -DestinationPath $dst -Force
+$found = Get-ChildItem $dst -Recurse -Filter 'MttVDD.inf' | Select-Object -First 1
+if ($found) { $infPath = $found.FullName; Log "已解压，INF 在 $infPath"}
+} else {
+Log '发布里没找到合适的驱动 zip（资产列表见日志上一行版本号，可手动去 Releases 看）'
+}
+} catch {
+Log "下载失败：$($_.Exception.Message)"
+}
+}
+if ($infPath) {
+Log '执行 pnputil /add-driver 把驱动包装入仓库…'
+pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
+} else {
+Log '拿不到 MttVDD.inf，无法继续。手动办法：浏览器打开'
+Log ' https://github.com/VirtualDrivers/Virtual-Display-Driver/releases'
+Log '下载最新版的驱动 zip 解压（或含 VDD Control 的 zip），把解压目录发我看，或解压后重跑本脚本（它会自己找到 INF）。'
+$script:ExitCode = 1
+}
+
+# ================= 四、设备节点 =================
+$vdd = $null
+if ($script:ExitCode -eq 0) {
+Section '四、VDD 设备节点（Root\MttVDD）'
+$vdd = Find-VddDevice
+if (-not $vdd -and $infPath) {
+Log '还没找到设备节点：pnputil 再装一次后重找…'
+pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
+Start-Sleep -Seconds 3
+$vdd = Find-VddDevice
+}
+if (-not $vdd -and $infPath) {
+Log '仍没有节点：用 SetupAPI 程序化创建（devcon install 的等价做法）…'
+$r = [SnugWinDevNode]::CreateRootDevice('MttVDD', 'Root\MttVDD', $infPath, 'Virtual Display Driver')
+Log "创建结果：$r"
+for ($i = 0; $i -lt 10 -and -not $vdd; $i++) {
+Start-Sleep -Seconds 3
+$vdd = Find-VddDevice
+}
+}
+if (-not $vdd) {
+Log '设备节点还是没建出来。兜底办法：用官方的 VDD Control 工具建——'
+Log ' 1) 打开 https://github.com/VirtualDrivers/Virtual-Display-Driver/releases'
+Log ' 2) 下最新版里名字含 VDD Control 的 zip，解压，右键管理员运行，点 Install'
+Log ' 3) 装完重跑本脚本，它会接着把配置和验证做完'
+Log '如果 VDC 的 Install 也失败，把本日志发我，并留意腾讯电脑管家是否弹了拦截提示。'
+$script:ExitCode = 1
+} else {
+$pc = Get-ProblemCode $vdd.InstanceId
+Log "找到 VDD 设备：$($vdd.FriendlyName) | 实例 $($vdd.InstanceId) | 状态 $($vdd.Status) | 问题码 $pc"
+if ($pc -eq 22) {
+Log '设备被禁用（问题码 22），正在启用…'
+pnputil.exe /enable-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
+Start-Sleep -Seconds 2
+$vdd = Find-VddDevice
+$pc = Get-ProblemCode $vdd.InstanceId
+Log "启用后状态：$($vdd.Status)，问题码 $pc"
+} elseif ($pc -and $pc -ne 0) {
+$hint = switch ($pc) {
+52 { '驱动签名验证失败：可能被内存完整性/安全启动策略拦截'}
+39 { '驱动加载失败：多半是缺 VC++ 运行时（看第一段日志）'}
+37 { '驱动初始化失败：多半是缺 VC++ 运行时（看第一段日志）'}
+31 { '驱动加载失败：多半是缺 VC++ 运行时（看第一段日志）'}
+28 { '驱动没绑上：后面的重启步骤若无效，需要重装驱动包'}
+43 { '设备自己报告了问题：重启设备或电脑后再看'}
+10 { '设备无法启动：看驱动日志与 VC++ 运行时'}
+default { '未归类的问题码，原文记录在上一行'}
+}
+Log "设备带问题码 $pc：$hint。本脚本继续往下走（写配置+重启设备），最后以虚拟屏是否出现为准。"
+}
+}
+}
+
+# ================= 五、配置 =================
+$script:DefaultSettingsXml = @'
+<?xml version='1.0' encoding='utf-8'?>
+<vdd_settings>
+<monitors>
+<count>1</count>
+</monitors>
+<gpu>
+<friendlyname>default</friendlyname>
+</gpu>
+<global>
+<g_refresh_rate>60</g_refresh_rate>
+<g_refresh_rate>90</g_refresh_rate>
+<g_refresh_rate>120</g_refresh_rate>
+<g_refresh_rate>144</g_refresh_rate>
+</global>
+<resolutions>
+<resolution>
+<width>1920</width>
+<height>1080</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+<resolution>
+<width>2560</width>
+<height>1440</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+<resolution>
+<width>3840</width>
+<height>2160</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+<resolution>
+<width>1080</width>
+<height>2346</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+</resolutions>
+<logging>
+<SendLogsThroughPipe>true</SendLogsThroughPipe>
+<logging>false</logging>
+<debuglogging>false</debuglogging>
+</logging>
+<colour>
+<SDR10bit>false</SDR10bit>
+<HDRPlus>false</HDRPlus>
+<ColourFormat>RGB</ColourFormat>
+</colour>
+<cursor>
+<HardwareCursor>true</HardwareCursor>
+<CursorMaxX>128</CursorMaxX>
+<CursorMaxY>128</CursorMaxY>
+<AlphaCursorSupport>true</AlphaCursorSupport>
+<XorCursorSupportLevel>2</XorCursorSupportLevel>
+</cursor>
+<edid>
+<CustomEdid>false</CustomEdid>
+<PreventSpoof>false</PreventSpoof>
+<EdidCeaOverride>false</EdidCeaOverride>
+</edid>
+</vdd_settings>
+'@
+
+function Ensure-VddSettings {
+$dir = 'C:\VirtualDisplayDriver'
+$path = Join-Path $dir 'vdd_settings.xml'
+if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null}
+if (-not (Test-Path $path)) {
+[IO.File]::WriteAllText($path, $script:DefaultSettingsXml, (New-Object Text.UTF8Encoding $false))
+Log "配置文件不存在，已按官方模板新建：$path（内含 1080×2346，count=1）"
+return
+}
+$bak = "$path.setup-script.bak"
+if (-not (Test-Path $bak)) {
+Copy-Item $path $bak
+Log "原配置已备份为 $bak"
+}
+$text = [IO.File]::ReadAllText($path)
+$orig = $text
+# monitors/count 至少为 1：只动 <monitors> 段内部，其余逐字节保留（与 app 的做法一致）
+$m = [regex]::Match($text, '(?s)<monitors>.*?</monitors>')
+if ($m.Success) {
+$seg = $m.Value
+$cm = [regex]::Match($seg, '<count>\s*(\d+)\s*</count>')
+if ($cm.Success) {
+if ([int]$cm.Groups[1].Value -lt 1) {
+$seg = $seg -replace '<count>\s*\d+\s*</count>', '<count>1</count>'
+$text = $text.Substring(0, $m.Index) + $seg + $text.Substring($m.Index + $m.Length)
+Log 'monitors/count 原本小于 1，已改为 1'
+}
+} else {
+$seg = $seg -replace '<monitors>', '<monitors><count>1</count>'
+$text = $text.Substring(0, $m.Index) + $seg + $text.Substring($m.Index + $m.Length)
+Log 'monitors 里没有 count，已补 <count>1</count>'
+}
+} else {
+$text = $text -replace '(<vdd_settings[^>]*>)', '$1<monitors><count>1</count></monitors>'
+Log '没有 monitors 节点，已补上'
+}
+if (-not ($text -match '<width>1080</width>' -and $text -match '<height>2346</height>')) {
+$block = "<resolution>`n <width>1080</width>`n <height>2346</height>`n <refresh_rate>60</refresh_rate>`n </resolution>`n "
+if ($text.Contains('</resolutions>')) {
+$text = $text.Replace('</resolutions>', $block + '</resolutions>')
+} elseif ($text.Contains('</vdd_settings>')) {
+$text = $text.Replace('</vdd_settings>', "<resolutions>`n $block</resolutions>`n</vdd_settings>")
+}
+Log '已往配置加入 1080×2346@60 分辨率'
+} else {
+Log '配置里已有 1080×2346 分辨率'
+}
+if ($text -ne $orig) {
+[IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding $false))
+Log "配置已写入 $path"
+} else {
+Log '配置无需修改'
+}
+}
+
+# ================= 六、生效验证 =================
+if ($vdd -and $script:ExitCode -eq 0) {
+Section '五、配置 vdd_settings.xml'
+Ensure-VddSettings
+
+Section '六、重启 VDD 设备并验证虚拟屏'
+pnputil.exe /restart-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
+$target = $null
+for ($i = 0; $i -lt 15 -and -not $target; $i++) {
+Start-Sleep -Seconds 2
+$target = Get-DisplayList | Where-Object { $_.Attached -and (Test-IsVirtual $_)} |
+Select-Object -First 1
+}
+if (-not $target) {
+Log '直接重启没等到虚拟屏：改用禁用→启用再试一轮…'
+pnputil.exe /disable-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
+Start-Sleep -Seconds 2
+pnputil.exe /enable-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
+for ($i = 0; $i -lt 15 -and -not $target; $i++) {
+Start-Sleep -Seconds 2
+$target = Get-DisplayList | Where-Object { $_.Attached -and (Test-IsVirtual $_)} |
+Select-Object -First 1
+}
+}
+if ($target) {
+Log "虚拟屏已出现：$($target.Name)（$($target.Desc)），当前分辨率 $($target.Mode)"
+if ($target.Mode -notmatch '^1080x2346') {
+$rc = [SnugWinDisplay]::SetMode($target.Name, 1080, 2346, 60)
+Log "设置 1080×2346@60 返回码 $rc（0=成功）"
+Start-Sleep -Seconds 1
+$now = Get-DisplayList | Where-Object { $_.Name -eq $target.Name} | Select-Object -First 1
+Log "设置后分辨率：$($now.Mode)"
+}
+Log '虚拟屏搞通了。回到 SnugWindows 点「刷新显示器」应能看到这块屏，再点「创建手机屏」走后续测试。'
+} else {
+$script:ExitCode = 1
+$vddNow = Find-VddDevice
+if ($vddNow) {
+Log "设备现状：状态 $($vddNow.Status)，问题码 $(Get-ProblemCode $vddNow.InstanceId)"
+}
+Log '设备在，但等了约 60 秒虚拟屏还没出现在桌面上。依次试：'
+Log ' 1) 重启一次电脑，再跑一遍本脚本（驱动刚建好节点时经常要重启才挂上显示器）；'
+Log ' 2) 腾讯电脑管家若弹过拦截要放行，或临时退出它再跑；'
+Log ' 3) 还不行就把本日志文件发我。'
+}
+}
+
+# ================= 总结 =================
+Section '总结'
+if ($script:ExitCode -eq 0) {
+Log '结果：虚拟屏已搞通（细节见上）。'
+} else {
+Log '结果：还没搞通，卡点见上面标/的那段。把日志发我接着查。'
+}
+Log "日志文件：$script:LogPath"
+if (-not $NoPause) { Read-Host '按回车关闭'}
+exit $script:ExitCode
