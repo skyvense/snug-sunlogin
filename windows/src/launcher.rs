@@ -1,5 +1,6 @@
 //! 手机屏上的「App 资源库」（对着 mac 版 PhoneHomeView 的行为）：
-//! 盖住整块虚拟屏，两个分页——「运行中」是正在跑的 App（点一下把它的窗口全屏到这块屏），
+//! 盖住整块虚拟屏，两个分页——「运行中」按 App 分组（点行把它的窗口全屏到这块屏；
+//! 多窗口的 App 行尾有展开钮，展开后逐个窗口选、逐个窗口关；单窗口行尾有 ✕ 直接关窗），
 //! 「全部」是开始菜单里的所有 App（图标网格，运行中的带圆点，点一下打开并全屏过来）。
 //! 顶部有搜索框。关掉资源库后，虚拟屏左上角留一个悬浮「App」键，点它再打开——
 //! 手机端看不见主窗口，这个键就是回资源库的路。
@@ -34,12 +35,30 @@ enum Tab {
     All,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum RowKind {
+    /// 「运行中」的 App 分组行：点击全屏它的第一个窗口。
+    AppGroup,
+    /// 分组展开后的单个窗口行（缩进显示）：点击全屏这个窗口，行尾 ✕ 关这个窗口。
+    WindowRow,
+    /// 「全部」的已安装 App。
+    Installed,
+}
+
 struct Item {
     name: String,
     sub: String,
     icon_path: String,
     running: bool,
     action: Action,
+    kind: RowKind,
+    /// 行尾 ✕ 能关的窗口（单窗口行有；多窗口分组行没有——关窗在展开的子行里逐个关）。
+    close_hwnd: Option<isize>,
+    /// 所属 App 分组键（展开状态按它记）；「全部」行为空。
+    app_key: String,
+    /// 分组行的窗口数（画展开钮用）。
+    win_count: usize,
+    expanded: bool,
 }
 
 #[derive(Clone)]
@@ -57,6 +76,8 @@ struct LauncherState {
     query: String,
     scroll: i32,
     rect: RECT,
+    /// 「运行中」里被展开的 App 分组键集合。
+    expanded: HashSet<String>,
     icons: HashMap<String, isize>,
     font_title: HFONT,
     font_name: HFONT,
@@ -184,6 +205,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
             query: String::new(),
             scroll: 0,
             rect,
+            expanded: HashSet::new(),
             icons: HashMap::new(),
             font_title: make_font(-38, 700),
             font_name: make_font(-26, 600),
@@ -553,25 +575,82 @@ fn matches_query(name: &str, sub: &str, query: &str) -> bool {
     name.to_lowercase().contains(&q) || sub.to_lowercase().contains(&q)
 }
 
+/// 一个运行中窗口的 App 分组键：exe 路径优先（同名不同路径算两个 App），退回程序名。
+fn app_key_of(w: &RunningWindow) -> String {
+    if !w.exe_path.is_empty() {
+        w.exe_path.clone()
+    } else {
+        w.app_name.clone()
+    }
+}
+
 /// 当前分页 + 搜索过滤后的条目。
+/// 「运行中」按 App 分组：一组一行，展开的组在行后跟它每个窗口的子行。
 fn current_items(s: &LauncherState) -> Vec<Item> {
     match s.tab {
-        Tab::Running => s
-            .running
-            .iter()
-            .filter(|w| matches_query(&w.app_name, &w.title, &s.query))
-            .map(|w| Item {
-                name: if w.app_name.is_empty() {
-                    w.title.clone()
+        Tab::Running => {
+            let mut groups: Vec<(String, Vec<&RunningWindow>)> = Vec::new();
+            for w in &s.running {
+                let key = app_key_of(w);
+                match groups.iter_mut().find(|(k, _)| *k == key) {
+                    Some((_, v)) => v.push(w),
+                    None => groups.push((key, vec![w])),
+                }
+            }
+            let mut out = Vec::new();
+            for (key, wins) in groups {
+                let first = wins[0];
+                let name = if first.app_name.is_empty() {
+                    first.title.clone()
                 } else {
-                    w.app_name.clone()
-                },
-                sub: w.title.clone(),
-                icon_path: w.exe_path.clone(),
-                running: true,
-                action: Action::Focus(w.hwnd),
-            })
-            .collect(),
+                    first.app_name.clone()
+                };
+                // 搜索：App 名或任一窗口标题命中都保留这组
+                if !matches_query(&name, "", &s.query)
+                    && !wins.iter().any(|w| matches_query("", &w.title, &s.query))
+                {
+                    continue;
+                }
+                let expanded = s.expanded.contains(&key);
+                out.push(Item {
+                    name: name.clone(),
+                    sub: if wins.len() > 1 {
+                        format!("{} 个窗口", wins.len())
+                    } else {
+                        first.title.clone()
+                    },
+                    icon_path: first.exe_path.clone(),
+                    running: true,
+                    action: Action::Focus(first.hwnd),
+                    kind: RowKind::AppGroup,
+                    close_hwnd: if wins.len() == 1 {
+                        Some(first.hwnd)
+                    } else {
+                        None
+                    },
+                    app_key: key.clone(),
+                    win_count: wins.len(),
+                    expanded,
+                });
+                if expanded {
+                    for w in &wins {
+                        out.push(Item {
+                            name: w.title.clone(),
+                            sub: String::new(),
+                            icon_path: w.exe_path.clone(),
+                            running: true,
+                            action: Action::Focus(w.hwnd),
+                            kind: RowKind::WindowRow,
+                            close_hwnd: Some(w.hwnd),
+                            app_key: key.clone(),
+                            win_count: 1,
+                            expanded: false,
+                        });
+                    }
+                }
+            }
+            out
+        }
         Tab::All => s
             .installed
             .iter()
@@ -588,10 +667,41 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                     icon_path: a.lnk_path.clone(),
                     running,
                     action: Action::Launch(a.lnk_path.clone()),
+                    kind: RowKind::Installed,
+                    close_hwnd: None,
+                    app_key: String::new(),
+                    win_count: 0,
+                    expanded: false,
                 }
             })
             .collect(),
     }
+}
+
+/// 行尾 ✕ 按钮的矩形（绘制与命中共用一套几何）。
+fn close_btn_rect(item: &Item, r: RECT, w: i32) -> Option<RECT> {
+    if item.close_hwnd.is_none() {
+        return None;
+    }
+    Some(RECT {
+        left: w - 84,
+        top: r.top + 16,
+        right: w - 20,
+        bottom: r.top + 72,
+    })
+}
+
+/// 行尾展开钮的矩形（仅多窗口分组行）。
+fn expand_chip_rect(item: &Item, r: RECT, w: i32) -> Option<RECT> {
+    if item.kind != RowKind::AppGroup || item.win_count < 2 {
+        return None;
+    }
+    Some(RECT {
+        left: w - 176,
+        top: r.top + 26,
+        right: w - 20,
+        bottom: r.top + 62,
+    })
 }
 
 fn cols_for(width: i32) -> i32 {
@@ -864,14 +974,25 @@ fn paint(hwnd: HWND) {
                 let icon = icon_cached(&item.icon_path);
                 match tab {
                     Tab::Running => {
+                        let is_window_row = item.kind == RowKind::WindowRow;
+                        // 文字右界给行尾按钮让位
+                        let text_right = expand_chip_rect(item, r, w)
+                            .map(|e| e.left - 12)
+                            .or_else(|| close_btn_rect(item, r, w).map(|c| c.left - 12))
+                            .unwrap_or(w - 20);
                         if let Some(hicon) = icon {
+                            let (ix, iy, isz) = if is_window_row {
+                                (56, r.top + 24, 40)
+                            } else {
+                                (20, r.top + 16, 56)
+                            };
                             let _ = DrawIconEx(
                                 mem,
-                                24,
-                                r.top + 14,
+                                ix,
+                                iy,
                                 HICON(hicon as *mut core::ffi::c_void),
-                                48,
-                                48,
+                                isz,
+                                isz,
                                 0,
                                 None,
                                 DI_NORMAL,
@@ -880,10 +1001,10 @@ fn paint(hwnd: HWND) {
                         SelectObject(mem, HGDIOBJ(font_name.0));
                         SetTextColor(mem, rgb(30, 30, 34));
                         let mut tr = RECT {
-                            left: 92,
-                            top: r.top + 8,
-                            right: w - 20,
-                            bottom: r.top + 42,
+                            left: if is_window_row { 112 } else { 100 },
+                            top: r.top + if is_window_row { 24 } else { 10 },
+                            right: text_right,
+                            bottom: r.top + if is_window_row { 64 } else { 50 },
                         };
                         draw_text(
                             mem,
@@ -891,20 +1012,53 @@ fn paint(hwnd: HWND) {
                             &mut tr,
                             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
                         );
-                        SelectObject(mem, HGDIOBJ(font_sub.0));
-                        SetTextColor(mem, rgb(125, 125, 133));
-                        let mut tr = RECT {
-                            left: 92,
-                            top: r.top + 40,
-                            right: w - 20,
-                            bottom: r.top + 70,
-                        };
-                        draw_text(
-                            mem,
-                            &item.sub,
-                            &mut tr,
-                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
-                        );
+                        if !is_window_row {
+                            SelectObject(mem, HGDIOBJ(font_sub.0));
+                            SetTextColor(mem, rgb(125, 125, 133));
+                            let mut tr = RECT {
+                                left: 100,
+                                top: r.top + 50,
+                                right: text_right,
+                                bottom: r.top + 82,
+                            };
+                            draw_text(
+                                mem,
+                                &item.sub,
+                                &mut tr,
+                                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                            );
+                        }
+                        // 行尾按钮（展开钮 / 关闭钮）：浅灰圆角底 + 深色字
+                        for (btn, label) in [
+                            (
+                                expand_chip_rect(item, r, w),
+                                if item.expanded {
+                                    "收起 ▴".to_string()
+                                } else {
+                                    format!("{} 窗 ▾", item.win_count)
+                                },
+                            ),
+                            (close_btn_rect(item, r, w), "✕".to_string()),
+                        ] {
+                            if let Some(mut br) = btn {
+                                let brush = CreateSolidBrush(rgb(228, 228, 233));
+                                let old_brush = SelectObject(mem, HGDIOBJ(brush.0));
+                                let old_pen = SelectObject(mem, GetStockObject(NULL_PEN));
+                                let _ = RoundRect(mem, br.left, br.top, br.right, br.bottom, 12, 12);
+                                SelectObject(mem, old_pen);
+                                SelectObject(mem, old_brush);
+                                let _ = DeleteObject(HGDIOBJ(brush.0));
+                                SelectObject(mem, HGDIOBJ(font_name.0));
+                                SetTextColor(mem, rgb(60, 60, 66));
+                                draw_text(
+                                    mem,
+                                    &label,
+                                    &mut br,
+                                    DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                                );
+                                SetTextColor(mem, rgb(30, 30, 34));
+                            }
+                        }
                     }
                     Tab::All => {
                         let tile_w = (w - 32) / cols_for(w);
@@ -912,11 +1066,11 @@ fn paint(hwnd: HWND) {
                         if let Some(hicon) = icon {
                             let _ = DrawIconEx(
                                 mem,
-                                cx - 32,
-                                r.top + 14,
+                                cx - 44,
+                                r.top + 16,
                                 HICON(hicon as *mut core::ffi::c_void),
-                                64,
-                                64,
+                                88,
+                                88,
                                 0,
                                 None,
                                 DI_NORMAL,
@@ -926,15 +1080,15 @@ fn paint(hwnd: HWND) {
                         SetTextColor(mem, rgb(30, 30, 34));
                         let mut tr = RECT {
                             left: r.left + 6,
-                            top: r.top + 88,
+                            top: r.top + 114,
                             right: r.right - 6,
-                            bottom: r.top + 138,
+                            bottom: r.top + 162,
                         };
                         draw_text(mem, &item.name, &mut tr, DT_CENTER | DT_WORDBREAK);
                         if item.running {
                             let dot = CreateSolidBrush(rgb(243, 107, 83));
                             let old = SelectObject(mem, HGDIOBJ(dot.0));
-                            let _ = Ellipse(mem, cx - 4, r.top + 142, cx + 4, r.top + 150);
+                            let _ = Ellipse(mem, cx - 4, r.top + 168, cx + 4, r.top + 176);
                             SelectObject(mem, old);
                             let _ = DeleteObject(HGDIOBJ(dot.0));
                         }
