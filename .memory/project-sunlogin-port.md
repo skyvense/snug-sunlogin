@@ -94,3 +94,8 @@ metadata:
 - 向导扩为五步走完闭环：检查 → 安装 → 创建验证 → 删除验证（remove_phone_screen 后轮询确认虚拟屏消失）→ 测试（重新创建 + testwin::open 把测试画面铺满虚拟屏，手机连进来看串流收官）。创建验证按 verify_for 分流（Create→删除步，Test→开测试窗）。
 - 测试窗口闪烁/不顺修复：窗口加 WS_CLIPCHILDREN（父窗口每帧 BitBlt 原先盖住顶部按钮逼其自绘）、WM_ERASEBKGND 返回 1 不擦背景、双缓冲后备位图改为缓存复用（原先每帧新建销毁 1080×2346 约 10MB 位图）。待机主真机确认按钮不再闪、动画更顺。
 - 教训重犯一次：同一消息块里并行发多个 muse.edit 会互相覆盖（快照式写入），WM_COMMAND 的一处编辑曾被同批后续编辑冲掉，靠 grep 才发现；依赖型编辑必须逐条发、逐条验。
+
+### 2026-11-20 21:5x 主窗口与向导现代化主题（已实现，CI 绿）
+- 机主嫌原生 Win32 整窗系统灰丑。改法（不换框架，全靠自绘）：窗口底色 #F5F5F7；原生分组框撤掉，父窗口 WM_PAINT 手绘白色圆角卡片（矩形由 layout 写入状态），组名改粗体静态标签；五个按钮改 BS_OWNERDRAW 自绘（main.rs draw_button，主窗口与向导共用：创建/向导动作钮=品牌金橙+深棕字，删除=珊瑚红+白字，其余=白底描边，圆角 12，按下变深，禁用灰）；静态文字/单选/日志/列表配色走 WM_CTLCOLOR* 与 LVM 设色统一（状态色保留绿/橙，提示次灰 rgb(110,110,115)，正文 rgb(29,29,31)）。
+- 向导闪烁与自绘的冲突已解：自绘按钮不能再翻 BS_DEFPUSHBUTTON 样式位，闪烁相位改走按钮 GWLP_USERDATA（0/1），draw_button 读到 1 时主按钮变深填充+3px 边。
+- windows 0.59 名称位置教训（均查本地 crate 源码证实）：DRAWITEMSTRUCT 在 UI::Controls、InvalidateRect 与 DrawTextW 在 Graphics::Gdi、EnableWindow 在 UI::Input::KeyboardAndMouse、HDC 在 Gdi 不在 Foundation。
