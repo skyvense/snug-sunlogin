@@ -29,9 +29,10 @@ pub fn run(program: &str, args: &[&str]) -> (i32, String) {
     }
 }
 
-/// 列出所有显示适配器。失败返回错误说明（不静默）。
+/// 列出在场的显示适配器（-PresentOnly：不含已消失的幽灵设备，
+/// 免得重启设备时挑中一个早就不在的实例）。失败返回错误说明（不静默）。
 pub fn display_adapters() -> Result<Vec<PnpDevice>, String> {
-    let script = "Get-PnpDevice -Class Display | ForEach-Object { $_.FriendlyName + '|' + $_.InstanceId + '|' + $_.Status }";
+    let script = "Get-PnpDevice -PresentOnly -Class Display | ForEach-Object { $_.FriendlyName + '|' + $_.InstanceId + '|' + $_.Status }";
     let (exit, output) = run(
         "powershell.exe",
         &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
@@ -85,14 +86,17 @@ pub fn problem_devices() -> Result<Vec<PnpDevice>, String> {
 }
 
 /// VDD 的适配器在设备管理器里一般叫 Virtual Display Driver；不同版本命名可能不同，
-/// 名字与实例 ID 都查（IddSample 系的实例 ID 带 IDDSAMPLE），大小写不敏感。
+/// 名字与实例 ID 都查：现行 VDD 的实例 ID 带 MTTVDD（Root\MttVDD\…），
+/// IddSample 系带 IDDSAMPLE，大小写不敏感。按实例 ID 认最稳——不依赖本地化的名字。
 pub fn find_vdd(devices: &[PnpDevice]) -> Option<&PnpDevice> {
     devices.iter().find(|d| {
         let name = d.friendly_name.to_lowercase();
         let id = d.instance_id.to_lowercase();
         name.contains("virtual display")
             || name.contains("virtualdisplaydriver")
+            || name.contains("mttvdd")
             || name.contains("iddsample")
+            || id.contains("mttvdd")
             || id.contains("iddsample")
             || id.contains("idd_sample")
     })

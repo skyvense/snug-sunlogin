@@ -297,25 +297,7 @@ fn log_no_vdd_diagnostics(list: &[devices::PnpDevice]) {
         }
         Err(e) => ui_log(&format!("诊断：{e}")),
     }
-    let (exit, output) = devices::run(
-        "winget",
-        &[
-            "list",
-            "--id",
-            "VirtualDrivers.Virtual-Display-Driver",
-            "--accept-source-agreements",
-        ],
-    );
-    if exit == 0 {
-        let tail: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
-        for line in tail.iter().rev().take(2).rev() {
-            ui_log(&format!("诊断：winget list：{line}"));
-        }
-    } else {
-        ui_log(&format!(
-            "诊断：winget list 退出码 {exit}（多半是 winget 里没这个包的安装记录）"
-        ));
-    }
+    ui_log("诊断：包在、节点不在，或设备在但驱动没真正起来（管道不通）这类问题，跑同目录的 setup-virtual-display.ps1 排查，它会把驱动活性与系统事件一并查清");
 }
 
 fn restart_vdd_device() -> bool {
@@ -391,7 +373,18 @@ fn create_phone_screen() {
     if !restart_vdd_device() {
         return;
     }
-    wait_pump(1800);
+    // 重启后虚拟屏要几秒才挂上桌面（真机实测约 2 秒，慢的机器更久）：
+    // 轮询等它出现，别用一次固定等待赌时间，否则会误报「没枚举到」。
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if display::list().iter().any(|d| d.is_virtual()) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        wait_pump(500);
+    }
     refresh_displays();
 
     // 重启后虚拟屏可能还停在旧模式，手动设成手机屏模式
@@ -535,7 +528,7 @@ fn toggle_launcher() {
 
 fn install_vdd() {
     let exe = std::env::current_exe().unwrap_or_default();
-    let script = exe.with_file_name("install-vdd.ps1");
+    let script = exe.with_file_name("setup-virtual-display.ps1");
     if script.exists() {
         match std::process::Command::new("powershell.exe")
             .args([
@@ -547,12 +540,11 @@ fn install_vdd() {
             ])
             .spawn()
         {
-            Ok(_) => ui_log("已打开 VDD 安装脚本窗口，按提示装完后回到这里点「创建手机屏」"),
-            Err(e) => ui_log(&format!("启动安装脚本失败：{e}")),
+            Ok(_) => ui_log("已打开虚拟屏搞通脚本窗口：它会自己提权，把驱动装完（官方包 + nefcon 建节点）并验证虚拟屏真的出现；跑完看它的结论，再回来点「创建手机屏」"),
+            Err(e) => ui_log(&format!("启动搞通脚本失败：{e}")),
         }
     } else {
-        ui_log("exe 旁边没找到 install-vdd.ps1，手动装：以管理员打开终端运行");
-        ui_log("  winget install --id VirtualDrivers.Virtual-Display-Driver -e");
+        ui_log("exe 旁边没找到 setup-virtual-display.ps1：它与 exe 在同一个发布包里，确认解压完整");
     }
 }
 
