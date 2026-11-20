@@ -22,16 +22,15 @@ use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontW, GetDeviceCaps, SetBkMode, SetTextColor, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
-    DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, FONT_WEIGHT, HBRUSH, HDC, HFONT, LOGPIXELSX,
-    OUT_DEFAULT_PRECIS, TRANSPARENT,
+    CreateFontW, GetDC, GetDeviceCaps, ReleaseDC, SetBkMode, SetTextColor, HBRUSH, HDC, HFONT,
+    LOGPIXELSX, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
-    InitCommonControlsEx, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX, LVCOLUMNW, LVCF_SUBITEM,
-    LVCF_TEXT, LVCF_WIDTH, LVIF_TEXT, LVITEMW, LVM_DELETEALLITEMS, LVM_INSERTCOLUMNW,
-    LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMTEXTW, LVS_EX_DOUBLEBUFFER,
-    LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWALWAYS, LVS_SINGLESEL,
+    InitCommonControlsEx, EM_SCROLLCARET, EM_SETSEL, ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX,
+    LVCOLUMNW, LVCF_SUBITEM, LVCF_TEXT, LVCF_WIDTH, LVIF_TEXT, LVITEMW, LVM_DELETEALLITEMS,
+    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMTEXTW,
+    LVS_EX_DOUBLEBUFFER, LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -191,6 +190,8 @@ fn mk_control(
 }
 
 /// 建一个 UI 字体：高度按磅数 × DPI 换算（负数表示按字符高度匹配）。
+/// 末尾几个参数用 Win32 常量的原始值：字符集 1=DEFAULT_CHARSET，
+/// 输出/裁剪精度 0=默认，质量 5=CLEARTYPE_QUALITY，pitch/family 0=默认。
 fn make_font(face: &str, points: i32, weight: i32, dpi: i32) -> HFONT {
     let face_w = display::wide(face);
     unsafe {
@@ -199,15 +200,15 @@ fn make_font(face: &str, points: i32, weight: i32, dpi: i32) -> HFONT {
             0,
             0,
             0,
-            FONT_WEIGHT(weight),
+            weight,
             0,
             0,
             0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY,
-            DEFAULT_PITCH | FF_DONTCARE,
+            1,
+            0,
+            0,
+            5,
+            0,
             PCWSTR(face_w.as_ptr()),
         )
     }
@@ -814,7 +815,7 @@ unsafe extern "system" fn main_wnd_proc(
                 hwnd,
                 "SysListView32",
                 "",
-                base | WS_BORDER | WINDOW_STYLE(LVS_REPORT | LVS_SINGLESEL | LVS_SHOWALWAYS),
+                base | WS_BORDER | WINDOW_STYLE(LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS),
                 0,
                 0,
                 10,
