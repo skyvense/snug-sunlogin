@@ -5,9 +5,7 @@
 use windows::core::PCWSTR;
 use windows::Win32::Graphics::Gdi::*;
 
-pub const PHONE_W: u32 = 1080;
-pub const PHONE_H: u32 = 2346;
-pub const PHONE_HZ: u32 = 60;
+// 手机屏规格不在这里写死：见 phones（按所选型号缩放，默认 1080×2346@60）。
 
 // DISPLAY_DEVICE.StateFlags 的位（用字面量避免类型摩擦，含义见 Win32 文档）
 const ATTACHED_TO_DESKTOP: u32 = 0x1;
@@ -28,8 +26,10 @@ pub struct DisplayInfo {
 }
 
 impl DisplayInfo {
+    /// 是不是当前所选型号的手机屏模式（规格在 phones 里，按型号缩放）。
     pub fn is_phone_mode(&self) -> bool {
-        self.width == PHONE_W && self.height == PHONE_H
+        let (w, h, _) = crate::phones::current_spec();
+        self.width == w && self.height == h
     }
     /// 是不是 VDD 的虚拟屏：适配器名在不同 VDD 版本里有两种叫法。
     pub fn is_virtual(&self) -> bool {

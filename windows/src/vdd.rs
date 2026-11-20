@@ -3,7 +3,7 @@
 //! （所以用字符串手术而不是 XML 解析重序列化）；第一次动手前留一份原始备份
 //! （.snug-pristine.bak，永不覆盖）；动过什么记在状态文件里，以便原样恢复。
 
-use crate::display::{PHONE_H, PHONE_HZ, PHONE_W};
+use crate::phones;
 use std::path::Path;
 
 pub const SETTINGS_PATH: &str = r"C:\VirtualDisplayDriver\vdd_settings.xml";
@@ -159,7 +159,8 @@ fn resolution_blocks(text: &str) -> Vec<(usize, usize)> {
 }
 
 fn is_phone_block(block: &str) -> bool {
-    extract_uint(block, "width") == Some(PHONE_W) && extract_uint(block, "height") == Some(PHONE_H)
+    let (w, h, _) = phones::current_spec();
+    extract_uint(block, "width") == Some(w) && extract_uint(block, "height") == Some(h)
 }
 
 pub fn has_phone_resolution(text: &str) -> bool {
@@ -190,7 +191,10 @@ pub fn resolution_summary(text: &str) -> String {
         .join("、")
 }
 
-const PHONE_BLOCK: &str = "<resolution>\n            <width>1080</width>\n            <height>2346</height>\n            <refresh_rate>60</refresh_rate>\n        </resolution>";
+fn phone_block() -> String {
+    let (w, h, hz) = phones::current_spec();
+    format!("<resolution>\n            <width>{w}</width>\n            <height>{h}</height>\n            <refresh_rate>{hz}</refresh_rate>\n        </resolution>")
+}
 
 /// 加上手机屏分辨率这一条（已有则不动）。返回新文本。
 pub fn add_phone_resolution(text: &str) -> String {
@@ -198,23 +202,24 @@ pub fn add_phone_resolution(text: &str) -> String {
         return text.to_string();
     }
     // 照着已有的条目克隆，保证字段口径跟这份文件自己的写法一致；一条都没有才用标准三件套
+    let (pw, ph, phz) = phones::current_spec();
     let blocks = resolution_blocks(text);
     let block = if let Some(&(s, e)) = blocks.first() {
         let mut b = text[s..e].to_string();
-        if let Some(nb) = set_uint(&b, "width", PHONE_W) {
+        if let Some(nb) = set_uint(&b, "width", pw) {
             b = nb;
         }
-        if let Some(nb) = set_uint(&b, "height", PHONE_H) {
+        if let Some(nb) = set_uint(&b, "height", ph) {
             b = nb;
         }
-        if let Some(nb) = set_uint(&b, "refresh_rate", PHONE_HZ) {
+        if let Some(nb) = set_uint(&b, "refresh_rate", phz) {
             b = nb;
         } else if let Some(pos) = b.rfind("</resolution>") {
-            b.insert_str(pos, "<refresh_rate>60</refresh_rate>");
+            b.insert_str(pos, &format!("<refresh_rate>{phz}</refresh_rate>"));
         }
         b
     } else {
-        PHONE_BLOCK.to_string()
+        phone_block()
     };
     if let Some(pos) = text.find("</resolutions>") {
         let mut out = String::with_capacity(text.len() + block.len() + 16);

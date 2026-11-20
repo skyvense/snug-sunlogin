@@ -1,9 +1,10 @@
 //! Snug for Sunlogin — Windows 版 spike（Rust）
 //!
 //! 只验证一件事：向日葵手机端能不能用一块 Windows 虚拟屏（VDD），串流是否流畅。
-//! 本工具做四件小事：枚举显示器并把 VDD 虚拟屏设成手机屏模式（1080×2346@60）；
-//! 按需改 VDD 配置并重启驱动设备（可原样恢复）；在虚拟屏上开动/静对照的测试窗口；
+//! 本工具做四件小事：枚举显示器并把 VDD 虚拟屏设成手机屏模式（尺寸按所选手机型号缩放，默认 1080×2346@60）；
+//! 按需改 VDD 配置并启停驱动设备（可原样恢复）；在虚拟屏上开动/静对照的测试窗口；
 //! 在虚拟屏上开 App 资源库（启动器）：运行中/全部两页 + 搜索，选中 App 自动全屏到虚拟屏。
+//! 另盯向日葵的 desktopagent 进程：主控连入自动建屏、断开自动拆屏（可在界面关掉）。
 //! 不做手势翻译（机主 2026-11-19 定）。
 
 #![windows_subsystem = "windows"]
@@ -13,11 +14,15 @@ mod devices;
 mod display;
 mod launcher;
 mod log;
+mod phones;
+mod session;
+mod settings;
 mod testwin;
 mod vdd;
 
-use display::{DisplayInfo, PHONE_H, PHONE_HZ, PHONE_W};
+use display::DisplayInfo;
 use std::cell::RefCell;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
@@ -41,6 +46,15 @@ const ID_REMOVE: i32 = 1003;
 const ID_TEST: i32 = 1004;
 const ID_INSTALL: i32 = 1005;
 const ID_LAUNCHER: i32 = 1006;
+const ID_MODEL: i32 = 1007;
+const ID_AUTO: i32 = 1008;
+
+// 组合框/按钮消息（用字面量，含义见 Win32 文档）
+const CB_ADDSTRING: u32 = 0x0143;
+const CB_GETCURSEL: u32 = 0x0147;
+const CB_SETCURSEL: u32 = 0x014E;
+const BM_GETCHECK: u32 = 0x00F0;
+const BM_SETCHECK: u32 = 0x00F1;
 
 /// 状态行级别，决定状态文字颜色：就绪绿、待处理橙、一般情况默认色。
 #[derive(Clone, Copy, PartialEq)]
@@ -675,6 +689,7 @@ fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
 
 fn create_phone_screen() {
     ui_log("—— 创建手机屏 ——");
+    let (pw, ph, phz) = phones::current_spec();
     let mut state = vdd::load_state();
     let (mut text, created) = match vdd::load_settings() {
         Ok(t) => (t, false),
@@ -694,11 +709,11 @@ fn create_phone_screen() {
             ui_log("monitors/count 设为 1");
         }
         if vdd::has_phone_resolution(&text) {
-            ui_log("配置里已有 1080×2346 分辨率，不重复加");
+            ui_log(&format!("配置里已有 {pw}×{ph} 分辨率，不重复加"));
         } else {
             text = vdd::add_phone_resolution(&text);
             state.added_resolution = true;
-            ui_log("已往配置加入 1080×2346@60 分辨率");
+            ui_log(&format!("已往配置加入 {pw}×{ph}@{phz} 分辨率"));
         }
     }
     if let Err(e) = vdd::save_settings(&text) {
@@ -740,14 +755,14 @@ fn create_phone_screen() {
     });
     match virtual_now {
         Some(d) if d.is_phone_mode() => {
-            ui_log("完成：手机屏已就绪（1080×2346@60）。用向日葵手机端连这台电脑、选这块屏测试");
+            ui_log(&format!("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试"));
         }
         Some(d) => {
             ui_log(&format!(
                 "虚拟屏当前 {}×{}@{}，设置成手机屏模式…",
                 d.width, d.height, d.hz
             ));
-            let r = display::set_mode(&d.device_name, PHONE_W, PHONE_H, PHONE_HZ);
+            let r = display::set_mode(&d.device_name, pw, ph, phz);
             ui_log(&format!(
                 "ChangeDisplaySettingsEx 返回 {r}（0 = 成功）"
             ));
@@ -760,9 +775,9 @@ fn create_phone_screen() {
                     .unwrap_or(false)
             });
             if ok {
-                ui_log("完成：手机屏已就绪（1080×2346@60）。用向日葵手机端连这台电脑、选这块屏测试");
+                ui_log(&format!("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试"));
             } else {
-                ui_log("设模式后仍不是 1080×2346，看上面枚举结果确认虚拟屏实际模式，并把日志贴回主会话");
+                ui_log(&format!("设模式后仍不是 {pw}×{ph}，看上面枚举结果确认虚拟屏实际模式，并把日志贴回主会话"));
             }
         }
         None => {
@@ -1007,7 +1022,7 @@ unsafe extern "system" fn main_wnd_proc(
             let phone_hint = mk_control(
                 hwnd,
                 "Static",
-                "向日葵中增加一块竖屏 · 1080×2346；移除会禁用驱动，创建时重新启用",
+                "向日葵中增加一块竖屏；移除会禁用驱动，创建时重新启用",
                 base,
                 0,
                 0,
