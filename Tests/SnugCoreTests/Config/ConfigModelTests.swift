@@ -4,11 +4,11 @@ import Testing
 
 @Suite("配置 AppConfig")
 struct ConfigModelTests {
-    @Test("默认值：手机屏和手势都开着，截图键关着，字号默认放大 2 级，还没看过欢迎页，从 GitHub 更新")
+    @Test("默认值：手机屏开着，手势关着（向日葵下强制关闭），截图键关着，字号默认放大 2 级，还没看过欢迎页，从 GitHub 更新")
     func defaults() {
         let c = AppConfig()
         #expect(c.phoneScreen)
-        #expect(c.gestures)
+        #expect(!c.gestures)
         #expect(!c.screenshot)
         #expect(c.zoomSteps == 2)
         #expect(!c.welcomed)
@@ -45,6 +45,12 @@ struct ConfigModelTests {
         #expect(c.phoneScreen)
         #expect(!c.screenshot)
         #expect(c.zoomSteps == 2)
+    }
+
+    @Test("存量配置里手势开着，解码后也是关的（向日葵下强制关闭，不读存量值）")
+    func gesturesForcedOff() throws {
+        let c = try JSONDecoder().decode(AppConfig.self, from: Data(#"{"gestures":true}"#.utf8))
+        #expect(!c.gestures)
     }
 
     @Test("手改出界的字号级数夹回 0...4")
