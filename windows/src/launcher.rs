@@ -922,6 +922,27 @@ fn draw_text(hdc: HDC, text: &str, rect: &mut RECT, format: DRAW_TEXT_FORMAT) {
     }
 }
 
+/// 无边圆角填充（页眉分段控件的轨道与滑块用）。
+fn fill_rounded(mem: HDC, rc: RECT, color: COLORREF, inset: i32) {
+    unsafe {
+        let brush = CreateSolidBrush(color);
+        let ob = SelectObject(mem, HGDIOBJ(brush.0));
+        let op = SelectObject(mem, GetStockObject(NULL_PEN));
+        let _ = RoundRect(
+            mem,
+            rc.left + inset,
+            rc.top + inset,
+            rc.right - inset,
+            rc.bottom - inset,
+            20,
+            20,
+        );
+        SelectObject(mem, op);
+        SelectObject(mem, ob);
+        let _ = DeleteObject(HGDIOBJ(brush.0));
+    }
+}
+
 fn paint(hwnd: HWND) {
     // 先把要画的东西快照出来：取图标时要再借一次状态，不能攥着借用画
     let snap = LAUNCHER.with(|c| {
@@ -968,25 +989,51 @@ fn paint(hwnd: HWND) {
             draw_text(mem, "App", &mut tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
             SelectObject(mem, HGDIOBJ(font_name.0));
             let (run_rc, all_rc, close_rc) = tab_rects(w);
+            // 页眉按钮组：两页签做成胶囊分段控件（浅灰轨道 + 品牌金橙滑块），
+            // 关闭做成珊瑚色圆钮配白 ✕，和运行圆点同一色系
+            let track = RECT {
+                left: run_rc.left,
+                top: run_rc.top,
+                right: all_rc.right,
+                bottom: run_rc.bottom,
+            };
+            fill_rounded(mem, track, rgb(231, 231, 235), 0);
             for (rcx, label, active) in [
                 (run_rc, "运行中", tab == Tab::Running),
                 (all_rc, "全部", tab == Tab::All),
-                (close_rc, "关闭", false),
             ] {
-                let fill = if active { rgb(38, 38, 43) } else { rgb(226, 226, 231) };
-                let brush = CreateSolidBrush(fill);
-                let pen = CreatePen(PS_SOLID, 1, fill);
-                let ob = SelectObject(mem, HGDIOBJ(brush.0));
-                let op = SelectObject(mem, HGDIOBJ(pen.0));
-                let _ = RoundRect(mem, rcx.left, rcx.top, rcx.right, rcx.bottom, 18, 18);
-                SelectObject(mem, ob);
-                SelectObject(mem, op);
-                let _ = DeleteObject(HGDIOBJ(brush.0));
-                let _ = DeleteObject(HGDIOBJ(pen.0));
-                SetTextColor(mem, if active { rgb(255, 255, 255) } else { rgb(30, 30, 34) });
+                if active {
+                    fill_rounded(mem, rcx, rgb(255, 172, 42), 3);
+                }
+                SetTextColor(
+                    mem,
+                    if active {
+                        rgb(70, 44, 0)
+                    } else {
+                        rgb(108, 108, 116)
+                    },
+                );
                 let mut trc = rcx;
                 draw_text(mem, label, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
+            let d = close_rc.bottom - close_rc.top;
+            let ccx = (close_rc.left + close_rc.right) / 2;
+            let circle = RECT {
+                left: ccx - d / 2,
+                top: close_rc.top,
+                right: ccx + d / 2,
+                bottom: close_rc.bottom,
+            };
+            let brush = CreateSolidBrush(rgb(243, 107, 83));
+            let ob = SelectObject(mem, HGDIOBJ(brush.0));
+            let op = SelectObject(mem, GetStockObject(NULL_PEN));
+            let _ = Ellipse(mem, circle.left, circle.top, circle.right, circle.bottom);
+            SelectObject(mem, op);
+            SelectObject(mem, ob);
+            let _ = DeleteObject(HGDIOBJ(brush.0));
+            SetTextColor(mem, rgb(255, 255, 255));
+            let mut trc = circle;
+            draw_text(mem, "✕", &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SetTextColor(mem, rgb(30, 30, 34));
 
             if items.is_empty() {
