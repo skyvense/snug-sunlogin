@@ -47,13 +47,13 @@ const ID_TEST: i32 = 1004;
 const ID_INSTALL: i32 = 1005;
 const ID_LAUNCHER: i32 = 1006;
 const ID_MODEL: i32 = 1007;
-const ID_AUTO: i32 = 1008;
+const ID_MODE_AUTO: i32 = 1008;
+const ID_MODE_MANUAL: i32 = 1009;
 
 // 组合框/按钮消息（用字面量，含义见 Win32 文档）
 const CB_ADDSTRING: u32 = 0x0143;
 const CB_GETCURSEL: u32 = 0x0147;
 const CB_SETCURSEL: u32 = 0x014E;
-const BM_GETCHECK: u32 = 0x00F0;
 const BM_SETCHECK: u32 = 0x00F1;
 
 /// 状态行级别，决定状态文字颜色：就绪绿、待处理橙、一般情况默认色。
@@ -79,7 +79,8 @@ struct MainState {
     grp_test: HWND,
     grp_driver: HWND,
     combo_model: HWND,
-    chk_auto: HWND,
+    radio_auto: HWND,
+    radio_manual: HWND,
     model_label: HWND,
     phone_model_id: String,
     auto_create: bool,
@@ -288,7 +289,8 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.btn_remove,
                 s.model_label,
                 s.combo_model,
-                s.chk_auto,
+                s.radio_auto,
+                s.radio_manual,
                 s.phone_hint,
                 s.grp_test,
                 s.btn_test,
@@ -313,7 +315,8 @@ fn layout_controls(client_w: i32, client_h: i32) {
         b_remove,
         model_label,
         combo_model,
-        chk_auto,
+        radio_auto,
+        radio_manual,
         phone_hint,
         grp_test,
         b_test,
@@ -361,7 +364,15 @@ fn layout_controls(client_w: i32, client_h: i32) {
         inner - sc(60),
         sc(180),
     );
-    move_ctrl(chk_auto, m + sc(12), gy + sc(94), inner, sc(22));
+    let radio_w = inner * 58 / 100;
+    move_ctrl(radio_auto, m + sc(12), gy + sc(94), radio_w, sc(22));
+    move_ctrl(
+        radio_manual,
+        m + sc(12) + radio_w + sc(8),
+        gy + sc(94),
+        inner - radio_w - sc(8),
+        sc(22),
+    );
     move_ctrl(phone_hint, m + sc(12), gy + sc(122), inner, sc(18));
     // 「测试」「驱动」两组并排
     let gh = sc(88);
@@ -962,23 +973,24 @@ fn on_model_changed() {
     refresh_displays();
 }
 
-fn on_auto_toggled() {
-    let chk = MAIN
-        .with(|c| c.borrow().as_ref().map(|s| s.chk_auto))
-        .unwrap_or_default();
-    if chk.is_invalid() {
-        return;
-    }
-    // BS_AUTOCHECKBOX 在 BN_CLICKED 之前已经翻好状态，这里读到的就是新状态
-    let checked = unsafe { SendMessageW(chk, BM_GETCHECK, None, None) }.0 != 0;
-    MAIN.with(|c| {
+/// 自动/手动模式切换：自动 = 主控连入建屏 + 开资源库、断开删屏；手动 = 只认按钮。
+/// 切到自动时若主控已经连着，立刻补上建屏与资源库。
+fn apply_auto_setting(auto: bool) {
+    let changed = MAIN.with(|c| {
         if let Some(s) = c.borrow_mut().as_mut() {
-            s.auto_create = checked;
+            let old = s.auto_create;
+            s.auto_create = auto;
+            old != auto
+        } else {
+            false
         }
     });
+    if !changed {
+        return;
+    }
     persist_settings();
-    if checked {
-        ui_log("自动建屏：开（主控连入时自动创建，断开自动移除）");
+    if auto {
+        ui_log("模式：自动（主控连入建屏并打开资源库，断开删屏）");
         let has_virtual = MAIN.with(|c| {
             c.borrow()
                 .as_ref()
@@ -992,7 +1004,7 @@ fn on_auto_toggled() {
             open_launcher_on_virtual();
         }
     } else {
-        ui_log("自动建屏：关（创建/移除手动点按钮）");
+        ui_log("模式：手动（创建/移除用「创建手机屏」「移除手机屏」按钮）");
     }
     refresh_displays();
 }
@@ -1255,22 +1267,41 @@ unsafe extern "system" fn main_wnd_proc(
             unsafe {
                 SendMessageW(combo_model, CB_SETCURSEL, Some(WPARAM(sel)), None);
             }
-            let chk_auto = mk_control(
+            let radio_auto = mk_control(
                 hwnd,
                 "Button",
-                "主控连入时自动建屏并打开资源库（断开自动移除）",
-                base | WINDOW_STYLE(0x0003), // BS_AUTOCHECKBOX
+                "自动：主控连入建屏并打开资源库，断开删屏",
+                base | WS_GROUP | WINDOW_STYLE(0x0009), // BS_AUTORADIOBUTTON
                 0,
                 0,
                 10,
                 10,
-                ID_AUTO,
+                ID_MODE_AUTO,
                 ui_font,
             );
-            if saved.auto_create {
-                unsafe {
-                    SendMessageW(chk_auto, BM_SETCHECK, Some(WPARAM(1)), None);
-                }
+            let radio_manual = mk_control(
+                hwnd,
+                "Button",
+                "手动：用上面的按钮建屏、删屏",
+                base | WINDOW_STYLE(0x0009), // BS_AUTORADIOBUTTON
+                0,
+                0,
+                10,
+                10,
+                ID_MODE_MANUAL,
+                ui_font,
+            );
+            unsafe {
+                SendMessageW(
+                    if saved.auto_create {
+                        radio_auto
+                    } else {
+                        radio_manual
+                    },
+                    BM_SETCHECK,
+                    Some(WPARAM(1)),
+                    None,
+                );
             }
             let grp_test = mk_control(
                 hwnd,
@@ -1357,7 +1388,8 @@ unsafe extern "system" fn main_wnd_proc(
                     grp_test,
                     grp_driver,
                     combo_model,
-                    chk_auto,
+                    radio_auto,
+                    radio_manual,
                     model_label,
                     phone_model_id: model.id.clone(),
                     auto_create: saved.auto_create,
@@ -1530,7 +1562,8 @@ unsafe extern "system" fn main_wnd_proc(
                 ID_LAUNCHER => toggle_launcher(),
                 ID_INSTALL => install_vdd(),
                 ID_MODEL if notify == 1 => on_model_changed(), // 1 = CBN_SELCHANGE
-                ID_AUTO => on_auto_toggled(),
+                ID_MODE_AUTO => apply_auto_setting(true),
+                ID_MODE_MANUAL => apply_auto_setting(false),
                 _ => {}
             }
             LRESULT(0)
