@@ -19,6 +19,7 @@ mod scale;
 mod session;
 mod settings;
 mod testwin;
+mod update;
 mod vdd;
 
 use display::DisplayInfo;
@@ -50,6 +51,7 @@ const ID_LAUNCHER: i32 = 1006;
 const ID_MODEL: i32 = 1007;
 const ID_MODE_AUTO: i32 = 1008;
 const ID_MODE_MANUAL: i32 = 1009;
+const ID_UPDATE: i32 = 1010;
 
 // 组合框/按钮消息（用字面量，含义见 Win32 文档）
 const CB_ADDSTRING: u32 = 0x0143;
@@ -74,6 +76,7 @@ struct MainState {
     btn_test: HWND,
     btn_launcher: HWND,
     btn_install: HWND,
+    btn_update: HWND,
     icon_box: HWND,
     detail: HWND,
     grp_phone: HWND,
@@ -130,6 +133,7 @@ fn main() {
         log::write("已有 SnugWindows 实例在运行，本实例退出");
         return;
     }
+    log::write(&format!("SnugWindows v{} 启动", env!("SNUG_VERSION")));
     std::process::exit(run());
 }
 
@@ -162,7 +166,10 @@ fn run() -> i32 {
         let dpi0 = GetDeviceCaps(Some(GetDC(None)), LOGPIXELSX);
         let win_w = 700 * dpi0 / 96;
         let win_h = 760 * dpi0 / 96;
-        let title_w = display::wide("Snug for Sunlogin — Windows 测试版（Rust）");
+        let title_w = display::wide(&format!(
+            "Snug for Sunlogin — Windows 版 v{}",
+            env!("SNUG_VERSION")
+        ));
         let hwnd = match CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PCWSTR(class_w.as_ptr()),
@@ -323,6 +330,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.grp_driver,
                 s.btn_install,
                 s.btn_refresh,
+                s.btn_update,
                 s.driver_hint,
                 s.log_edit,
                 s.dpi,
@@ -349,6 +357,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
         grp_driver,
         b_install,
         b_refresh,
+        b_update,
         driver_hint,
         log_edit,
         dpi,
@@ -398,8 +407,8 @@ fn layout_controls(client_w: i32, client_h: i32) {
         sc(22),
     );
     move_ctrl(phone_hint, m + sc(12), gy + sc(122), inner, sc(18));
-    // 「测试」「驱动」两组并排
-    let gh = sc(88);
+    // 「测试」「驱动」两组并排（驱动组多一行「检查更新」，组高一起加大）
+    let gh = sc(126);
     let ry = gy + gh_phone + sc(12);
     let half = (cw - sc(8)) / 2;
     let inner2 = half - sc(24);
@@ -424,7 +433,8 @@ fn layout_controls(client_w: i32, client_h: i32) {
         inner2 - bw - sc(8),
         sc(36),
     );
-    move_ctrl(driver_hint, gx + sc(12), ry + sc(62), inner2, sc(18));
+    move_ctrl(b_update, gx + sc(12), ry + sc(62), inner2, sc(32));
+    move_ctrl(driver_hint, gx + sc(12), ry + sc(102), inner2, sc(18));
     // 日志吃掉剩余高度
     let log_y = ry + gh + sc(12);
     move_ctrl(log_edit, m, log_y, cw, client_h - log_y - m);
@@ -1414,6 +1424,8 @@ unsafe extern "system" fn main_wnd_proc(
                 mk_control(hwnd, "Button", "安装 VDD", base, 0, 0, 10, 10, ID_INSTALL, ui_font);
             let btn_refresh =
                 mk_control(hwnd, "Button", "刷新显示器", base, 0, 0, 10, 10, ID_REFRESH, ui_font);
+            let btn_update =
+                mk_control(hwnd, "Button", "检查更新", base, 0, 0, 10, 10, ID_UPDATE, ui_font);
             let driver_hint = mk_control(
                 hwnd,
                 "Static",
@@ -1449,6 +1461,7 @@ unsafe extern "system" fn main_wnd_proc(
                     btn_test,
                     btn_launcher,
                     btn_install,
+                    btn_update,
                     icon_box,
                     detail,
                     grp_phone,
@@ -1491,6 +1504,8 @@ unsafe extern "system" fn main_wnd_proc(
                 "自动建屏：关"
             });
             session::spawn(hwnd.0 as usize);
+            // 启动后静默查一次新版：没有就不打扰，有才弹窗问
+            update::spawn_check(hwnd.0 as usize, false);
             LRESULT(0)
         }
         WM_SIZE => {
@@ -1620,6 +1635,52 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
+        update::WM_UPDATE_AVAILABLE => {
+            if let Some(latest) = update::take_pending() {
+                let text = format!(
+                    "发现新版本 v{}（当前 v{}）。\n\n现在下载并更新吗？下载完程序会重启一次完成替换。",
+                    latest.version,
+                    update::current_version()
+                );
+                let text_w = display::wide(&text);
+                let cap_w = display::wide("SnugWindows 更新");
+                let yes = unsafe {
+                    MessageBoxW(
+                        Some(hwnd),
+                        PCWSTR(text_w.as_ptr()),
+                        PCWSTR(cap_w.as_ptr()),
+                        MB_YESNO | MB_ICONQUESTION,
+                    )
+                };
+                if yes == IDYES {
+                    ui_log(&format!("开始下载更新 v{}…", latest.version));
+                    update::spawn_prepare(hwnd.0 as usize, latest);
+                } else {
+                    ui_log("已取消更新（下次启动或点「检查更新」还会再问）");
+                }
+            }
+            LRESULT(0)
+        }
+        update::WM_UPDATE_NONE => {
+            ui_log(&format!("已是最新版（v{}）", update::current_version()));
+            LRESULT(0)
+        }
+        update::WM_UPDATE_FAILED => {
+            if let Some(e) = update::take_failure() {
+                ui_log(&format!("更新没成：{e}"));
+            }
+            LRESULT(0)
+        }
+        update::WM_UPDATE_READY => {
+            ui_log("新版已下载并验好，正在重启完成更新…");
+            match update::launch_swap() {
+                Ok(()) => unsafe {
+                    let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+                },
+                Err(e) => ui_log(&format!("更新没成：{e}")),
+            }
+            LRESULT(0)
+        }
         WM_COMMAND => {
             let id = (wparam.0 as u32 & 0xffff) as i32;
             let notify = (wparam.0 as u32 >> 16) as u32;
@@ -1636,6 +1697,10 @@ unsafe extern "system" fn main_wnd_proc(
                 ID_TEST => toggle_test_window(),
                 ID_LAUNCHER => toggle_launcher(),
                 ID_INSTALL => install_vdd(),
+                ID_UPDATE => {
+                    ui_log("正在检查更新…");
+                    update::spawn_check(hwnd.0 as usize, true);
+                }
                 ID_MODEL if notify == 1 => on_model_changed(), // 1 = CBN_SELCHANGE
                 ID_MODE_AUTO => apply_auto_setting(true),
                 ID_MODE_MANUAL => apply_auto_setting(false),
