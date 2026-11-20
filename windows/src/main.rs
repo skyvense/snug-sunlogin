@@ -78,6 +78,13 @@ struct MainState {
     grp_phone: HWND,
     grp_test: HWND,
     grp_driver: HWND,
+    combo_model: HWND,
+    chk_auto: HWND,
+    model_label: HWND,
+    phone_model_id: String,
+    auto_create: bool,
+    /// 当前这块屏是自动建的（主控断开时只拆自动建的，手动建的不碰）。
+    screen_auto_owned: bool,
     phone_hint: HWND,
     test_hint: HWND,
     driver_hint: HWND,
@@ -279,6 +286,9 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.grp_phone,
                 s.btn_create,
                 s.btn_remove,
+                s.model_label,
+                s.combo_model,
+                s.chk_auto,
                 s.phone_hint,
                 s.grp_test,
                 s.btn_test,
@@ -301,6 +311,9 @@ fn layout_controls(client_w: i32, client_h: i32) {
         grp_phone,
         b_create,
         b_remove,
+        model_label,
+        combo_model,
+        chk_auto,
         phone_hint,
         grp_test,
         b_test,
@@ -325,10 +338,10 @@ fn layout_controls(client_w: i32, client_h: i32) {
     move_ctrl(detail, m + sc(50), sc(36), cw - sc(50), sc(20));
     // 显示器列表
     move_ctrl(list, m, sc(64), cw, sc(116));
-    // 「手机屏」组：整宽，创建是大按钮
+    // 「手机屏」组：整宽，四行——创建/移除按钮、型号下拉、自动开关、说明
     let gy = sc(192);
-    let gh = sc(88);
-    move_ctrl(grp_phone, m, gy, cw, gh);
+    let gh_phone = sc(148);
+    move_ctrl(grp_phone, m, gy, cw, gh_phone);
     let inner = cw - sc(24);
     let create_w = inner * 55 / 100;
     move_ctrl(b_create, m + sc(12), gy + sc(20), create_w, sc(36));
@@ -339,9 +352,20 @@ fn layout_controls(client_w: i32, client_h: i32) {
         inner - create_w - sc(8),
         sc(36),
     );
-    move_ctrl(phone_hint, m + sc(12), gy + sc(62), inner, sc(18));
+    move_ctrl(model_label, m + sc(12), gy + sc(66), sc(56), sc(20));
+    // 下拉框的矩形高含展开后的列表部分，收起时只占一行
+    move_ctrl(
+        combo_model,
+        m + sc(12) + sc(60),
+        gy + sc(63),
+        inner - sc(60),
+        sc(180),
+    );
+    move_ctrl(chk_auto, m + sc(12), gy + sc(94), inner, sc(22));
+    move_ctrl(phone_hint, m + sc(12), gy + sc(122), inner, sc(18));
     // 「测试」「驱动」两组并排
-    let ry = gy + gh + sc(12);
+    let gh = sc(88);
+    let ry = gy + gh_phone + sc(12);
     let half = (cw - sc(8)) / 2;
     let inner2 = half - sc(24);
     let bw = (inner2 - sc(8)) / 2;
@@ -520,7 +544,11 @@ fn wait_pump(ms: u64) {
 // MARK: 业务动作
 
 /// 状态文案学 Mac 版：一句标题 + 一句短说明，颜色按级别（就绪绿、待处理橙、一般灰）。
-fn status_info(displays: &[DisplayInfo]) -> (String, String, StatusLevel) {
+fn status_info(
+    displays: &[DisplayInfo],
+    auto_create: bool,
+    agent_present: bool,
+) -> (String, String, StatusLevel) {
     if let Some(d) = displays.iter().find(|d| d.is_virtual() && d.is_phone_mode()) {
         return (
             "手机屏已就绪".to_string(),
@@ -536,6 +564,14 @@ fn status_info(displays: &[DisplayInfo]) -> (String, String, StatusLevel) {
                 d.width, d.height, d.hz
             ),
             StatusLevel::Warn,
+        );
+    }
+    if auto_create && !agent_present {
+        let (w, h, _) = phones::current_spec();
+        return (
+            "等待主控连入".to_string(),
+            format!("向日葵主控连入后自动建屏 · 当前型号 {w}×{h}"),
+            StatusLevel::Neutral,
         );
     }
     if vdd::settings_exists() {
@@ -554,7 +590,17 @@ fn status_info(displays: &[DisplayInfo]) -> (String, String, StatusLevel) {
 
 fn refresh_displays() {
     let displays = display::list();
-    let (headline, detail_text, level) = status_info(&displays);
+    let auto_create = MAIN.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|s| s.auto_create)
+            .unwrap_or(true)
+    });
+    let (headline, detail_text, level) = status_info(
+        &displays,
+        auto_create,
+        session::AGENT_PRESENT.load(Ordering::Relaxed),
+    );
     let (list, status, detail) = MAIN.with(|c| {
         let mut cell = c.borrow_mut();
         match cell.as_mut() {
@@ -851,6 +897,105 @@ fn remove_phone_screen() {
     }
 }
 
+fn set_screen_owner(auto: bool) {
+    MAIN.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.screen_auto_owned = auto;
+        }
+    });
+}
+
+fn persist_settings() {
+    MAIN.with(|c| {
+        if let Some(s) = c.borrow().as_ref() {
+            settings::save(&settings::Settings {
+                phone_model_id: s.phone_model_id.clone(),
+                auto_create: s.auto_create,
+            });
+        }
+    });
+}
+
+/// 换型号：屏在用时先按旧规格拆干净（配置手术认的是当前规格），再换规格重建。
+fn on_model_changed() {
+    let combo = MAIN
+        .with(|c| c.borrow().as_ref().map(|s| s.combo_model))
+        .unwrap_or_default();
+    if combo.is_invalid() {
+        return;
+    }
+    let idx = unsafe { SendMessageW(combo, CB_GETCURSEL, None, None) }.0 as i32;
+    if idx < 0 {
+        return;
+    }
+    let Some(model) = phones::catalog().get(idx as usize).cloned() else {
+        return;
+    };
+    let old_id = MAIN
+        .with(|c| c.borrow().as_ref().map(|s| s.phone_model_id.clone()))
+        .unwrap_or_default();
+    if model.id == old_id {
+        return;
+    }
+    let has_virtual = MAIN.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|s| s.displays.iter().any(|d| d.is_virtual()))
+            .unwrap_or(false)
+    });
+    if has_virtual {
+        ui_log("换型号：先移除现有虚拟屏…");
+        remove_phone_screen();
+    }
+    phones::set_current_model(&model);
+    MAIN.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.phone_model_id = model.id.clone();
+        }
+    });
+    persist_settings();
+    let (w, h, hz) = phones::current_spec();
+    ui_log(&format!("手机型号 → {}（虚拟屏 {}×{}@{}）", model.id, w, h, hz));
+    if has_virtual {
+        create_phone_screen();
+    }
+    refresh_displays();
+}
+
+fn on_auto_toggled() {
+    let chk = MAIN
+        .with(|c| c.borrow().as_ref().map(|s| s.chk_auto))
+        .unwrap_or_default();
+    if chk.is_invalid() {
+        return;
+    }
+    // BS_AUTOCHECKBOX 在 BN_CLICKED 之前已经翻好状态，这里读到的就是新状态
+    let checked = unsafe { SendMessageW(chk, BM_GETCHECK, None, None) }.0 != 0;
+    MAIN.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.auto_create = checked;
+        }
+    });
+    persist_settings();
+    if checked {
+        ui_log("自动建屏：开（主控连入时自动创建，断开自动移除）");
+        let has_virtual = MAIN.with(|c| {
+            c.borrow()
+                .as_ref()
+                .map(|s| s.displays.iter().any(|d| d.is_virtual()))
+                .unwrap_or(false)
+        });
+        if session::AGENT_PRESENT.load(Ordering::Relaxed) && !has_virtual {
+            ui_log("主控已经连着，立即创建手机屏…");
+            set_screen_owner(true);
+            create_phone_screen();
+        }
+    } else {
+        ui_log("自动建屏：关（创建/移除手动点按钮）");
+    }
+    refresh_displays();
+}
+
 /// 挑目标屏：手机屏模式的虚拟屏 > 虚拟屏 > 主屏 > 第一块。
 fn pick_target_display() -> Option<DisplayInfo> {
     MAIN.with(|c| {
@@ -1003,6 +1148,11 @@ unsafe extern "system" fn main_wnd_proc(
                 ui_font,
             );
             init_list_columns(list, dpi);
+            // 本应用设置：选的型号决定当前规格（配置手术、模式判定都读 phones 的当前规格）
+            let saved = settings::load();
+            let model =
+                phones::model_by_id(&saved.phone_model_id).unwrap_or_else(phones::standard_model);
+            phones::set_current_model(&model);
             let grp_phone = mk_control(
                 hwnd,
                 "Button",
@@ -1031,6 +1181,65 @@ unsafe extern "system" fn main_wnd_proc(
                 9011,
                 ui_font,
             );
+            let model_label = mk_control(
+                hwnd,
+                "Static",
+                "手机型号",
+                base,
+                0,
+                0,
+                10,
+                10,
+                9016,
+                ui_font,
+            );
+            let combo_model = mk_control(
+                hwnd,
+                "ComboBox",
+                "",
+                base | WS_VSCROLL | WINDOW_STYLE(0x0003), // CBS_DROPDOWNLIST
+                0,
+                0,
+                10,
+                10,
+                ID_MODEL,
+                ui_font,
+            );
+            for m in phones::catalog() {
+                let name_w = display::wide(&m.id);
+                unsafe {
+                    SendMessageW(
+                        combo_model,
+                        CB_ADDSTRING,
+                        None,
+                        Some(LPARAM(name_w.as_ptr() as isize)),
+                    );
+                }
+            }
+            let sel = phones::catalog()
+                .iter()
+                .position(|m| m.id == model.id)
+                .unwrap_or(0);
+            unsafe {
+                SendMessageW(combo_model, CB_SETCURSEL, Some(WPARAM(sel)), None);
+            }
+            let chk_auto = mk_control(
+                hwnd,
+                "Button",
+                "主控连入时自动建屏（断开自动移除）",
+                base | WINDOW_STYLE(0x0003), // BS_AUTOCHECKBOX
+                0,
+                0,
+                10,
+                10,
+                ID_AUTO,
+                ui_font,
+            );
+            if saved.auto_create {
+                unsafe {
+                    SendMessageW(chk_auto, BM_SETCHECK, Some(WPARAM(1)), None);
+                }
+            }
             let grp_test = mk_control(
                 hwnd,
                 "Button",
@@ -1115,6 +1324,12 @@ unsafe extern "system" fn main_wnd_proc(
                     grp_phone,
                     grp_test,
                     grp_driver,
+                    combo_model,
+                    chk_auto,
+                    model_label,
+                    phone_model_id: model.id.clone(),
+                    auto_create: saved.auto_create,
+                    screen_auto_owned: false,
                     phone_hint,
                     test_hint,
                     driver_hint,
@@ -1134,6 +1349,17 @@ unsafe extern "system" fn main_wnd_proc(
             ui_log(&format!("日志文件：{}", log::dir().join("snug-windows.log").display()));
             ui_log("范围：只做虚拟屏与串流测试，不做手势翻译");
             refresh_displays();
+            let (sw, sh, shz) = phones::current_spec();
+            ui_log(&format!(
+                "手机型号：{}（虚拟屏 {}×{}@{}）",
+                model.id, sw, sh, shz
+            ));
+            ui_log(if saved.auto_create {
+                "自动建屏：开（盯 desktopagent 进程，主控连入自动创建、断开自动移除）"
+            } else {
+                "自动建屏：关"
+            });
+            session::spawn(hwnd.0 as usize);
             LRESULT(0)
         }
         WM_SIZE => {
@@ -1149,7 +1375,7 @@ unsafe extern "system" fn main_wnd_proc(
             let mmi = lparam.0 as *mut MINMAXINFO;
             unsafe {
                 (*mmi).ptMinTrackSize.x = 600 * dpi / 96;
-                (*mmi).ptMinTrackSize.y = 540 * dpi / 96;
+                (*mmi).ptMinTrackSize.y = 620 * dpi / 96;
             }
             LRESULT(0)
         }
@@ -1212,14 +1438,62 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
+        session::WM_SESSION_START => {
+            ui_log("检测到向日葵主控连入（desktopagent 进程已启动）");
+            let (auto, has_virtual) = MAIN.with(|c| {
+                c.borrow()
+                    .as_ref()
+                    .map(|s| (s.auto_create, s.displays.iter().any(|d| d.is_virtual())))
+                    .unwrap_or((false, false))
+            });
+            if auto && !has_virtual {
+                ui_log("自动创建手机屏…");
+                set_screen_owner(true);
+                create_phone_screen();
+            } else {
+                refresh_displays();
+            }
+            LRESULT(0)
+        }
+        session::WM_SESSION_END => {
+            ui_log("向日葵主控已断开（desktopagent 进程已退出）");
+            let (auto, owned, has_virtual) = MAIN.with(|c| {
+                c.borrow().as_ref().map(|s| {
+                    (
+                        s.auto_create,
+                        s.screen_auto_owned,
+                        s.displays.iter().any(|d| d.is_virtual()),
+                    )
+                }).unwrap_or((false, false, false))
+            });
+            // 只拆自动建的：手动建的屏留给用户自己决定
+            if auto && owned && has_virtual {
+                ui_log("自动移除手机屏…");
+                remove_phone_screen();
+                set_screen_owner(false);
+            } else {
+                refresh_displays();
+            }
+            LRESULT(0)
+        }
         WM_COMMAND => {
-            match (wparam.0 as u32 & 0xffff) as i32 {
+            let id = (wparam.0 as u32 & 0xffff) as i32;
+            let notify = (wparam.0 as u32 >> 16) as u32;
+            match id {
                 ID_REFRESH => refresh_displays(),
-                ID_CREATE => create_phone_screen(),
-                ID_REMOVE => remove_phone_screen(),
+                ID_CREATE => {
+                    set_screen_owner(false);
+                    create_phone_screen();
+                }
+                ID_REMOVE => {
+                    set_screen_owner(false);
+                    remove_phone_screen();
+                }
                 ID_TEST => toggle_test_window(),
                 ID_LAUNCHER => toggle_launcher(),
                 ID_INSTALL => install_vdd(),
+                ID_MODEL if notify == 1 => on_model_changed(), // 1 = CBN_SELCHANGE
+                ID_AUTO => on_auto_toggled(),
                 _ => {}
             }
             LRESULT(0)
