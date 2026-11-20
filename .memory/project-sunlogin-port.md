@@ -68,3 +68,8 @@ metadata:
 
 ### 2026-11-20 18:1x 自动拆屏失效根因：会话查询自匹配（已修）
 - 机主实测：自动模式断开后不拆屏，日志无「主控已断开」；且机主自查进程列表确认 desktopagent 断开后确实退出。根因在查询本身：session.rs 的脚本经 -Command 传给 powershell.exe，标记串 --mod=desktopagent 就在查询进程自己的命令行里，Get-CimInstance 全量枚举每次都查到它自己 → agent_running 恒为真 → 会话被永远判为连着，END 永不触发（连入侧 START 也因此在程序启动数秒后虚假触发）。修复：Where-Object 加 $_.ProcessId -ne $PID 排除查询进程自己；边沿事件补写文件日志。CI 双绿（44716614620/44716634876）。待机主真机复测：不连手机启动应显示「等待主控连入」且不自动建屏；连入建屏；断开约 10 秒内日志出现「主控已断开」并拆屏。
+
+### 2026-11-20 18:4x 同事机器装不上驱动：证书 + 选错设备 + 双开（已修）
+- 同事证据链经逐条核对全部属实：① 驱动自签名证书（CN=Virtual Display Driver）不在受信任存储时 pnputil /add-driver 直接拒绝，而 setup-virtual-display.ps1 原先没有任何证书导入逻辑（官方包靠 installCert.bat 做这步）；② 应用 find_vdd 按友好名 "virtual display" 模糊匹配 + is_virtual 按适配器名 contains 匹配，在装了 GameViewer/AskLink 等别家虚拟适配器的机器上会先命中别人的设备去启用/重启/禁用；③ 同机双开两个实例。
+- 修复：脚本在 pnputil 前从驱动包 .cat 提取签名证书（Get-AuthenticodeSignature）导入 LocalMachine Root + TrustedPublisher，不依赖包附带 .cer；find_vdd 改为只认实例 ID 带 MTTVDD 或硬件 ID 精确等于 Root\MttVDD/MttVDD（枚举附带 DEVPKEY_Device_HardwareIds），is_virtual 只认适配器名以 "Virtual Display Driver" 开头或带 MttVDD（INF 的 DeviceDesc 实测就是该字符串）；main 加 CreateMutexW 单实例互斥（windows 0.59 里该函数不在 Threading 路径，直接声明 kernel32 导入；第二个实例写日志退出）。pnputil 退出码 50 未做硬中止：本就启用时也可能非 0，成败仍以枚举验证为准。
+- 教训：同一消息里并行发多个 edit + 依赖它们的 commit exec，exec 可能在 edit 落盘前执行——出现过「提交只落了导入行、函数体留在工作区」的半成品提交，后以补提交修复。依赖顺序的工具调用不要同批并行。
