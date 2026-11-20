@@ -9,17 +9,16 @@
 - 一台能被向日葵手机端控制的 Windows 10/11 机器（x64）
 - 向日葵被控端已装好并能正常被手机控制
 - 本应用 `SnugWindows.exe`（GitHub Actions 的 `SnugSunlogin-Windows-Rust` 产物，
-  与 `install-vdd.ps1`、`setup-virtual-display.ps1`、`SPIKE.md` 在同一个包里）
+  与 `setup-virtual-display.ps1`、`SPIKE.md` 在同一个包里）
 
 ## 步骤
 
 1. 双击 `SnugWindows.exe`（会弹 UAC，需要管理员：改 VDD 配置、重启驱动设备要用）。
-2. 点「安装 VDD」（或手动跑同目录的 `install-vdd.ps1`），装完看主窗口状态行。
-   若状态行仍说没枚举到虚拟屏——驱动包明明装上了、设备节点却没建出来的典型
-   症状——双击同目录的 `setup-virtual-display.ps1`（会自动提权）：它盘点全部
-   Idd 驱动（别人的只看不动）、缺驱动包就从官方发布补装、缺设备节点就用
-   SetupAPI 程序化建 `Root\MttVDD`、写好 1080×2346 配置并重启设备验证虚拟屏
-   真的出现在桌面上。全程日志在同目录 `setup-virtual-display.log`。
+2. 点「安装 VDD」（会打开同目录的 `setup-virtual-display.ps1`，或手动跑它也行；
+   它会自动提权）：它盘点全部 Idd 驱动（别人的只看不动）、缺驱动包就从官方发布
+   补装、设备没真正装好就用 nefcon 重建 `Root\MttVDD` 节点、写好 1080×2346
+   配置并验证虚拟屏真的出现在桌面上。全程日志在同目录
+   `setup-virtual-display.log`，跑完看主窗口状态行。
 3. 点「创建手机屏」：应用自动把 1080×2346@60 写进 VDD 配置、重启驱动设备、
    并把虚拟屏设成该模式。状态行应显示「手机屏已就绪」。
 4. 点「测试窗口」：测试窗口铺满虚拟屏，默认动态模式（帧号持续变、球在弹、竖条在扫）。

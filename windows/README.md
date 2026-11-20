@@ -7,7 +7,8 @@ macOS 版的 Windows 对照版。同一仓库、双平台：macOS 代码仍在�
 
 **只做 spike：验证向日葵手机端能不能用一块 Windows 虚拟屏。手势翻译不做。**
 
-- 虚拟屏：复用开源的 Virtual Display Driver（VDD，已签名，winget 安装），不自研驱动
+- 虚拟屏：复用开源的 Virtual Display Driver（VDD，已签名；由同捆的
+  `setup-virtual-display.ps1` 用官方驱动包 + nefcon 安装），不自研驱动
 - 应用本体（`SnugWindows.exe`，Rust + Win32）：
   - 枚举显示器，找到 VDD 虚拟屏
   - 「创建手机屏」：把 1080×2346@60 写进 VDD 配置（`C:\VirtualDisplayDriver\vdd_settings.xml`，
@@ -25,7 +26,7 @@ macOS 版的 Windows 对照版。同一仓库、双平台：macOS 代码仍在�
 ## 怎么跑
 
 普通用户不用装 Rust：去 GitHub Actions 的 `Windows App (Rust)` 工作流下载
-`SnugSunlogin-Windows-Rust` 产物（exe + `install-vdd.ps1` + `SPIKE.md`），
+`SnugSunlogin-Windows-Rust` 产物（exe + `setup-virtual-display.ps1` + `SPIKE.md`），
 按 `SPIKE.md` 的步骤测。
 
 本地构建（需要 Rust 工具链）：
