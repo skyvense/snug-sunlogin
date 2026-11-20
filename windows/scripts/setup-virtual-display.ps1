@@ -219,6 +219,78 @@ public static class SnugWinDevNode
             return "UpdateDriverForPlugAndPlayDevices 失败，Win32 错误 " + Marshal.GetLastWin32Error();
         return reboot ? "OK（需要重启）" : "OK";
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct SP_DRVINFO_DATA
+    {
+        public uint cbSize;
+        public uint DriverType;
+        public UIntPtr Reserved;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string Description;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string MfgName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string ProviderName;
+        public long DriverDate;
+        public ulong DriverVersion;
+    }
+
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool SetupDiOpenDeviceInfo(IntPtr DeviceInfoSet, string DeviceInstanceId, IntPtr hwndParent, uint OpenFlags, ref SP_DEVINFO_DATA DeviceInfoData);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern bool SetupDiBuildDriverInfoList(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, uint DriverType);
+
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool SetupDiEnumDriverInfo(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, uint DriverType, uint MemberIndex, ref SP_DRVINFO_DATA DriverInfoData);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern bool SetupDiDestroyDriverInfoList(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, uint DriverType);
+
+    [DllImport("newdev.dll", SetLastError = true)]
+    static extern bool DiInstallDevice(IntPtr hwndParent, IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData, ref SP_DRVINFO_DATA DriverInfoData, uint Flags, out bool NeedReboot);
+
+    const uint SPDIT_CLASSDRIVER = 0x00000002;
+
+    // 给已存在的设备实例绑上驱动仓库里匹配它的驱动（DiInstallDevice）。
+    // UpdateDriverForPlugAndPlayDevices 靠硬件 ID 全局找设备，刚建好的节点它可能
+    // 找不到（实测报 ERROR_NO_SUCH_DEVINST 0xE000020B）；这条路按实例 ID 打开
+    // 设备、从仓库枚举出匹配的驱动直接装，不绕那个弯。
+    public static string InstallStagedDriver(string instanceId)
+    {
+        Guid classGuid = new Guid("{4d36e968-e325-11ce-bfc1-08002be10318}"); // 显示类（节点就是按这个类建的）
+        IntPtr set = SetupDiCreateDeviceInfoList(ref classGuid, IntPtr.Zero);
+        if (set == IntPtr.Zero || set == new IntPtr(-1))
+            return "SetupDiCreateDeviceInfoList 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+        try
+        {
+            var dev = new SP_DEVINFO_DATA();
+            dev.cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVINFO_DATA));
+            if (!SetupDiOpenDeviceInfo(set, instanceId, IntPtr.Zero, 0, ref dev))
+                return "SetupDiOpenDeviceInfo 失败（实例打不开），Win32 错误 " + Marshal.GetLastWin32Error();
+            if (!SetupDiBuildDriverInfoList(set, ref dev, SPDIT_CLASSDRIVER))
+                return "SetupDiBuildDriverInfoList 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+            try
+            {
+                for (uint i = 0; ; i++)
+                {
+                    var drv = new SP_DRVINFO_DATA();
+                    drv.cbSize = (uint)Marshal.SizeOf(typeof(SP_DRVINFO_DATA));
+                    if (!SetupDiEnumDriverInfo(set, ref dev, SPDIT_CLASSDRIVER, i, ref drv)) break;
+                    bool match = (drv.Description != null && drv.Description.IndexOf("Virtual Display", StringComparison.OrdinalIgnoreCase) >= 0)
+                        || (drv.ProviderName != null && drv.ProviderName.IndexOf("MikeTheTech", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (match)
+                    {
+                        bool reboot;
+                        if (!DiInstallDevice(IntPtr.Zero, set, ref dev, ref drv, 0, out reboot))
+                            return "DiInstallDevice 失败，Win32 错误 " + Marshal.GetLastWin32Error();
+                        return reboot ? "OK（需要重启）" : "OK";
+                    }
+                }
+                return "驱动仓库里没枚举到匹配的 Virtual Display Driver（驱动包可能没装好）";
+            }
+            finally { SetupDiDestroyDriverInfoList(set, ref dev, SPDIT_CLASSDRIVER); }
+        }
+        finally { SetupDiDestroyDeviceInfoList(set); }
+    }
 }
 '@
 }
@@ -254,16 +326,30 @@ function Get-HardwareIds([string]$instanceId) {
     } catch { return @() }
 }
 
-# 按硬件 ID 找 VDD 设备（不看名字，什么语言的系统都一样）；先查显示类，再兜底扫 ROOT\* 设备。
+# 找 VDD 设备。第一版在这里逐个设备取属性，机器上设备条目一多就慢得像卡死；
+# 现在先用实例 ID 字符串匹配（不取属性，秒回），最后才对显示类里 ROOT 开头的
+# 少数设备做硬件 ID 核对。
 function Find-VddDevice {
-    $candidates = @()
-    $candidates += Get-PnpDevice -Class Display -ErrorAction SilentlyContinue
-    $candidates += Get-PnpDevice -ErrorAction SilentlyContinue |
-        Where-Object { $_.InstanceId -like 'ROOT\*' -and $_.Class -ne 'Display' }
-    foreach ($dev in ($candidates | Sort-Object InstanceId -Unique)) {
+    $d = Get-PnpDevice -InstanceId 'ROOT\MttVDD\0000' -ErrorAction SilentlyContinue
+    if ($d) { return $d }
+    $d = Get-PnpDevice -Class Display -ErrorAction SilentlyContinue |
+        Where-Object { $_.InstanceId -match 'MttVDD' } | Select-Object -First 1
+    if ($d) { return $d }
+    $d = Get-PnpDevice -ErrorAction SilentlyContinue |
+        Where-Object { $_.InstanceId -match 'MttVDD' } | Select-Object -First 1
+    if ($d) { return $d }
+    foreach ($dev in (Get-PnpDevice -Class Display -ErrorAction SilentlyContinue |
+            Where-Object { $_.InstanceId -like 'ROOT\*' })) {
         if ((Get-HardwareIds $dev.InstanceId) -contains 'Root\MttVDD') { return $dev }
     }
     return $null
+}
+
+function Get-DriverInfPath([string]$instanceId) {
+    try {
+        $p = Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_DriverInfPath' -ErrorAction Stop
+        return $p.Data
+    } catch { return $null }
 }
 
 # ================= 一、环境 =================
@@ -291,9 +377,12 @@ if ($a.InstanceId -notlike 'PCI\*' -and $a.FriendlyName -notmatch 'Intel|AMD|NVI
 Log ' ↑ 虚拟/Idd 类适配器（不是物理显卡），只盘点、不动它'
 }
 }
-foreach ($mo in (Get-PnpDevice -Class Monitor -ErrorAction SilentlyContinue)) {
-Log "显示器：$($mo.FriendlyName) | 状态 $($mo.Status) | $($mo.InstanceId)"
+$allMonitors = Get-PnpDevice -Class Monitor -ErrorAction SilentlyContinue
+$okMonitors = @($allMonitors | Where-Object { $_.Status -eq 'OK' })
+foreach ($mo in $okMonitors) {
+Log "显示器（在用）：$($mo.FriendlyName) | $($mo.InstanceId)"
 }
+Log "显示器条目共 $($allMonitors.Count) 个，其中状态 OK 的 $($okMonitors.Count) 个（其余是历史残留记录，不逐条打了）"
 foreach ($d in (Get-DisplayList)) {
 Log "桌面显示：$($d.Name) | $($d.Desc) | 已接入=$($d.Attached) 主屏=$($d.Primary) | 当前 $($d.Mode)"
 }
@@ -356,23 +445,28 @@ $vdd = $null
 if ($script:ExitCode -eq 0) {
 Section '四、VDD 设备节点（Root\MttVDD）'
 $vdd = Find-VddDevice
+if ($vdd) {
+Log "设备节点已存在：$($vdd.FriendlyName) | 实例 $($vdd.InstanceId) | 状态 $($vdd.Status) | 问题码 $(Get-ProblemCode $vdd.InstanceId) | 驱动 INF $(Get-DriverInfPath $vdd.InstanceId)"
+}
 if (-not $vdd -and $infPath) {
-Log '还没找到设备节点：pnputil 再装一次后重找…'
+Log '没有节点：pnputil 再装一次后重找…'
 pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 2
 $vdd = Find-VddDevice
 }
 if (-not $vdd -and $infPath) {
 Log '仍没有节点：用 SetupAPI 程序化创建（devcon install 的等价做法）…'
 $r = [SnugWinDevNode]::CreateRootDevice('MttVDD', 'Root\MttVDD', $infPath, 'Virtual Display Driver')
 Log "创建结果：$r"
-for ($i = 0; $i -lt 10 -and -not $vdd; $i++) {
-Start-Sleep -Seconds 3
+Log '注：若上面报 ERROR_NO_SUCH_DEVINST(0xE000020B)，是绑驱动那步没找到刚建的节点，不代表节点没建出来——下面先找节点，找到了走补绑阶梯。'
+for ($i = 1; $i -le 5 -and -not $vdd; $i++) {
+Start-Sleep -Seconds 2
 $vdd = Find-VddDevice
+Log " 创建后第 $i 次找设备：$(if ($vdd) { '找到了'} else { '还没有'})"
 }
 }
 if (-not $vdd) {
-Log '设备节点还是没建出来。兜底办法：用官方的 VDD Control 工具建——'
+Log '【受阻】设备节点还是没建出来。兜底办法：用官方的 VDD Control 工具建——'
 Log ' 1) 打开 https://github.com/VirtualDrivers/Virtual-Display-Driver/releases'
 Log ' 2) 下最新版里名字含 VDD Control 的 zip，解压，右键管理员运行，点 Install'
 Log ' 3) 装完重跑本脚本，它会接着把配置和验证做完'
@@ -380,21 +474,53 @@ Log '如果 VDC 的 Install 也失败，把本日志发我，并留意腾讯电�
 $script:ExitCode = 1
 } else {
 $pc = Get-ProblemCode $vdd.InstanceId
-Log "找到 VDD 设备：$($vdd.FriendlyName) | 实例 $($vdd.InstanceId) | 状态 $($vdd.Status) | 问题码 $pc"
+$drvInf = Get-DriverInfPath $vdd.InstanceId
+Log "节点现状：状态 $($vdd.Status) | 问题码 $pc | 驱动 INF $drvInf"
+if ($pc -eq 28 -or -not $drvInf) {
+Log '节点在、驱动没绑上（问题码 28），依次尝试补绑，每步后复查：'
+Log ' 尝试 A：pnputil /add-driver /install（节点已存在时它能匹配上）'
+pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
+Start-Sleep -Seconds 2
+$vdd = Find-VddDevice
+$pc = Get-ProblemCode $vdd.InstanceId
+$drvInf = Get-DriverInfPath $vdd.InstanceId
+Log " A 后：问题码 $pc | 驱动 INF $drvInf"
+if ($pc -eq 28 -or -not $drvInf) {
+Log ' 尝试 B：pnputil /scan-devices 让 PnP 重新枚举'
+pnputil.exe /scan-devices 2>&1 | ForEach-Object { Log " pnputil: $_"}
+Start-Sleep -Seconds 3
+$vdd = Find-VddDevice
+$pc = Get-ProblemCode $vdd.InstanceId
+$drvInf = Get-DriverInfPath $vdd.InstanceId
+Log " B 后：问题码 $pc | 驱动 INF $drvInf"
+}
+if ($pc -eq 28 -or -not $drvInf) {
+Log ' 尝试 C：DiInstallDevice 按实例把仓库里的驱动直接绑上'
+$r2 = [SnugWinDevNode]::InstallStagedDriver($vdd.InstanceId)
+Log " C 结果：$r2"
+Start-Sleep -Seconds 2
+$vdd = Find-VddDevice
+$pc = Get-ProblemCode $vdd.InstanceId
+$drvInf = Get-DriverInfPath $vdd.InstanceId
+Log " C 后：问题码 $pc | 驱动 INF $drvInf"
+}
+}
+$pc = Get-ProblemCode $vdd.InstanceId
 if ($pc -eq 22) {
 Log '设备被禁用（问题码 22），正在启用…'
 pnputil.exe /enable-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
 Start-Sleep -Seconds 2
 $vdd = Find-VddDevice
-$pc = Get-ProblemCode $vdd.InstanceId
-Log "启用后状态：$($vdd.Status)，问题码 $pc"
+Log "启用后：状态 $($vdd.Status)，问题码 $(Get-ProblemCode $vdd.InstanceId)"
+} elseif ($pc -eq 28) {
+Log '【受阻】补绑阶梯走完，驱动还是没绑上（问题码 28）。把本日志发我；也可以先在设备管理器里对这个设备手动「更新驱动程序 → 自动搜索」试一次。'
+$script:ExitCode = 1
 } elseif ($pc -and $pc -ne 0) {
 $hint = switch ($pc) {
 52 { '驱动签名验证失败：可能被内存完整性/安全启动策略拦截'}
 39 { '驱动加载失败：多半是缺 VC++ 运行时（看第一段日志）'}
 37 { '驱动初始化失败：多半是缺 VC++ 运行时（看第一段日志）'}
 31 { '驱动加载失败：多半是缺 VC++ 运行时（看第一段日志）'}
-28 { '驱动没绑上：后面的重启步骤若无效，需要重装驱动包'}
 43 { '设备自己报告了问题：重启设备或电脑后再看'}
 10 { '设备无法启动：看驱动日志与 VC++ 运行时'}
 default { '未归类的问题码，原文记录在上一行'}
@@ -529,21 +655,25 @@ Ensure-VddSettings
 
 Section '六、重启 VDD 设备并验证虚拟屏'
 pnputil.exe /restart-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
+Log '等虚拟屏出现（最多 30 秒，每 10 秒报一次进度）…'
 $target = $null
 for ($i = 0; $i -lt 15 -and -not $target; $i++) {
 Start-Sleep -Seconds 2
 $target = Get-DisplayList | Where-Object { $_.Attached -and (Test-IsVirtual $_)} |
 Select-Object -First 1
+if (-not $target -and ($i + 1) % 5 -eq 0) { Log " 已等 $(($i + 1) * 2) 秒，还没出现，继续等…"}
 }
 if (-not $target) {
 Log '直接重启没等到虚拟屏：改用禁用→启用再试一轮…'
 pnputil.exe /disable-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
 Start-Sleep -Seconds 2
 pnputil.exe /enable-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
+Log '再等虚拟屏出现（最多 30 秒）…'
 for ($i = 0; $i -lt 15 -and -not $target; $i++) {
 Start-Sleep -Seconds 2
 $target = Get-DisplayList | Where-Object { $_.Attached -and (Test-IsVirtual $_)} |
 Select-Object -First 1
+if (-not $target -and ($i + 1) % 5 -eq 0) { Log " 已等 $(($i + 1) * 2) 秒，还没出现，继续等…"}
 }
 }
 if ($target) {
