@@ -64,3 +64,4 @@ metadata:
 ### 2026-11-20 17:2x 合入 main + v2.6.0 双平台发版（机主指令）
 - 合并检查：main 零独有提交、windows 分支领先 53 提交、merge-tree 无冲突 → 快进合并已完成并推送，main CI（44709202550，mac 构建与测试）绿。合并前发现分组提交漏了命中接线两处编辑（滞留工作区），已补提交 015ff30 并验 CI 绿才合并。
 - release.yml 新增 windows-dist 任务：needs dist（等 mac 建好 Release）、不绑 Environment（无签名 secrets、免二次批准），按 windows-app.yml 同款配方构建，zip 内含 SnugWindows.exe + setup-virtual-display.ps1 + windows/README.md，附 .sha256，gh release upload --clobber 挂同一 Release。VERSION 升 2.6.0（a7b762f），注释标签 v2.6.0 已推，Release run 44709754420 处于 waiting——等机主在 Actions 里批准 release Environment；批准后 mac DMG 四件套 + Windows zip 应同挂 v2.6.0 Release，待验。
+- 结果（2026-11-20 17:3x）：机主批准后 Release run 44709754420 全绿（mac dist 4m4s、windows-dist 1m16s）；v2.6.0 Release 资产六件齐全已验：Snug-Sunlogin-2.6.0.dmg + .sha256、Snug-2.6.0.pack、update.json、Snug-Sunlogin-Windows-2.6.0.zip（381,778 B）+ .sha256。根 README 已同步改为双平台（简介/实测/下载安装/系统要求/工作原理/构建，提交于 main）。
