@@ -101,6 +101,18 @@ thread_local! {
     static MAIN: RefCell<Option<MainState>> = const { RefCell::new(None) };
 }
 
+// 单实例互斥量用的两个 kernel32 导入：windows 0.59 里 CreateMutexW 不在
+// Win32::System::Threading 路径下（CI 实测 unresolved import），直接声明更稳。
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn CreateMutexW(
+        attrs: *const std::ffi::c_void,
+        initial_owner: i32,
+        name: *const u16,
+    ) -> *mut std::ffi::c_void;
+    fn GetLastError() -> u32;
+}
+
 fn main() {
     log::init();
     // GUI 子系统下 panic 默认无处可见，统一落到日志文件，方便事后排障
@@ -108,19 +120,16 @@ fn main() {
         log::write(&format!("PANIC：{info}"));
     }));
     // 单实例：双开时两个进程会同时盯会话、抢着建/拆同一块虚拟屏
-    // （2026-11-20 实测有用户同时开了两个）。互斥量句柄留到进程退出才释放。
-    let _instance = unsafe {
-        match CreateMutexW(None, false, w!("SnugSunloginWindows.SingleInstance")) {
-            Ok(h) => {
-                if GetLastError() == ERROR_ALREADY_EXISTS {
-                    log::write("已有 SnugWindows 实例在运行，本实例退出");
-                    return;
-                }
-                Some(h)
-            }
-            Err(_) => None,
-        }
-    };
+    // （2026-11-20 实测有用户同时开了两个）。句柄留到进程退出才释放。
+    let mutex_name: Vec<u16> = "SnugSunloginWindows.SingleInstance\0"
+        .encode_utf16()
+        .collect();
+    let _instance = unsafe { CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr()) };
+    if !_instance.is_null() && unsafe { GetLastError() } == 183 {
+        // 183 = ERROR_ALREADY_EXISTS：已有实例在跑
+        log::write("已有 SnugWindows 实例在运行，本实例退出");
+        return;
+    }
     std::process::exit(run());
 }
 
