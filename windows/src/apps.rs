@@ -213,7 +213,7 @@ fn current_place(hwnd: HWND) -> Option<(RECT, bool)> {
 pub fn record_place(hwnd: isize, touched: bool) {
     let h = HWND(hwnd as *mut core::ffi::c_void);
     unsafe {
-        if !IsWindow(h).as_bool() {
+        if !IsWindow(Some(h)).as_bool() {
             return;
         }
     }
@@ -261,7 +261,7 @@ pub fn restore_saved_places(virtual_rect: Option<RECT>) -> usize {
     for (hwnd_raw, saved) in map {
         let h = HWND(hwnd_raw as *mut core::ffi::c_void);
         unsafe {
-            if !IsWindow(h).as_bool() {
+            if !IsWindow(Some(h)).as_bool() {
                 continue;
             }
             let on_virtual = virtual_rect.map(|vr| window_center_in(h, vr)).unwrap_or(false);
