@@ -59,12 +59,14 @@ struct Item {
     /// 分组行的窗口数（画展开钮用）。
     win_count: usize,
     expanded: bool,
+    /// 这条 App 的目标 exe（运行中精确匹配用；窗口行/分组行也带自己的 exe）。
+    exe_path: String,
 }
 
 #[derive(Clone)]
 enum Action {
     Focus(isize),   // 已有窗口：全屏过去
-    Launch(String), // .lnk 路径：打开后等窗口出现再全屏
+    Launch(String), // 启动凭据（.lnk 路径 / aumid: 前缀 / exe 路径）：打开后等窗口出现再全屏
 }
 
 struct LauncherState {
@@ -73,6 +75,8 @@ struct LauncherState {
     tab: Tab,
     running: Vec<RunningWindow>,
     installed: Vec<InstalledApp>,
+    /// 最近使用（Recent 目录解析出的 App 子集，无搜索时在「全部」置顶）。
+    recent: Vec<InstalledApp>,
     query: String,
     scroll: i32,
     rect: RECT,
@@ -184,10 +188,12 @@ pub fn open(rect: RECT) -> Result<(), String> {
     hide_home();
     let running = apps::running_windows();
     let installed = apps::installed_apps();
+    let recent = apps::recent_apps(&installed);
     crate::log::write(&format!(
-        "资源库：运行中 {} 个窗口，全部 {} 个 App",
+        "资源库：运行中 {} 个窗口，全部 {} 个 App，最近使用 {} 个",
         running.len(),
-        installed.len()
+        installed.len(),
+        recent.len()
     ));
     for w in &running {
         crate::log::write(&format!(
@@ -202,6 +208,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
             tab: Tab::Running,
             running,
             installed,
+            recent,
             query: String::new(),
             scroll: 0,
             rect,
@@ -631,6 +638,7 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                     app_key: key.clone(),
                     win_count: wins.len(),
                     expanded,
+                    exe_path: first.exe_path.clone(),
                 });
                 if expanded {
                     for w in &wins {
@@ -645,37 +653,76 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                             app_key: key.clone(),
                             win_count: 1,
                             expanded: false,
+                            exe_path: w.exe_path.clone(),
                         });
                     }
                 }
             }
             out
         }
-        Tab::All => s
-            .installed
-            .iter()
-            .filter(|a| matches_query(&a.name, "", &s.query))
-            .map(|a| {
-                let running = s.running.iter().any(|w| {
-                    !w.app_name.is_empty()
-                        && (a.name.eq_ignore_ascii_case(&w.app_name)
-                            || w.title.to_lowercase().contains(&a.name.to_lowercase()))
-                });
+        Tab::All => {
+            let to_item = |a: &InstalledApp, recent: bool| {
+                let running = match_running(a, &s.running).is_some();
                 Item {
                     name: a.name.clone(),
-                    sub: if running { "运行中".to_string() } else { String::new() },
-                    icon_path: a.lnk_path.clone(),
+                    sub: if running {
+                        "运行中".to_string()
+                    } else if recent {
+                        "最近使用".to_string()
+                    } else {
+                        String::new()
+                    },
+                    icon_path: a.icon_key(),
                     running,
-                    action: Action::Launch(a.lnk_path.clone()),
+                    action: Action::Launch(a.launch_spec()),
                     kind: RowKind::Installed,
                     close_hwnd: None,
                     app_key: String::new(),
                     win_count: 0,
                     expanded: false,
+                    exe_path: a.exe_path.clone(),
                 }
-            })
-            .collect(),
+            };
+            if !s.query.is_empty() {
+                // 搜索时平铺全部（最近里的也都在全部名单内，不必分段）
+                return s
+                    .installed
+                    .iter()
+                    .filter(|a| matches_query(&a.name, "", &s.query))
+                    .map(|a| to_item(a, false))
+                    .collect();
+            }
+            // 无搜索：最近使用置顶，其余按名字序；在最近里出现过的不要在下面重复
+            let recent_keys: HashSet<String> = s.recent.iter().map(|a| a.key()).collect();
+            let mut out: Vec<Item> = s.recent.iter().map(|a| to_item(a, true)).collect();
+            out.extend(
+                s.installed
+                    .iter()
+                    .filter(|a| !recent_keys.contains(&a.key()))
+                    .map(|a| to_item(a, false)),
+            );
+            out
+        }
     }
+}
+
+/// 「全部」里一条 App 与运行中窗口的匹配：exe 路径精确匹配优先；
+/// 没有 exe（打包/UWP 应用）才退回名字/标题启发式——UWP 窗口常挂在
+/// ApplicationFrameHost 名下，只能靠标题认。
+fn match_running<'a>(a: &InstalledApp, wins: &'a [RunningWindow]) -> Option<&'a RunningWindow> {
+    if !a.exe_path.is_empty() {
+        if let Some(w) = wins
+            .iter()
+            .find(|w| w.exe_path.eq_ignore_ascii_case(&a.exe_path))
+        {
+            return Some(w);
+        }
+    }
+    wins.iter().find(|w| {
+        !w.app_name.is_empty()
+            && (a.name.eq_ignore_ascii_case(&w.app_name)
+                || w.title.to_lowercase().contains(&a.name.to_lowercase()))
+    })
 }
 
 /// 行尾 ✕ 按钮的矩形（绘制与命中共用一套几何）。
@@ -825,12 +872,26 @@ fn run_action(action: Action, name: &str) {
             }
             close();
         }
-        Action::Launch(lnk) => {
-            // 已在运行的同名 App：直接放它的窗口，不重复打开
+        Action::Launch(spec) => {
+            // 这条 App 的目标 exe（从状态里按启动凭据反查）：运行中判定先按 exe 精确匹配
+            let exe_path = LAUNCHER.with(|c| {
+                c.borrow()
+                    .as_ref()
+                    .and_then(|s| {
+                        s.installed
+                            .iter()
+                            .chain(s.recent.iter())
+                            .find(|a| a.launch_spec() == spec)
+                            .map(|a| a.exe_path.clone())
+                    })
+                    .unwrap_or_default()
+            });
+            // 已在运行的同一个 App：直接放它的窗口，不重复打开
             let existing = apps::running_windows().into_iter().find(|w| {
-                !w.app_name.is_empty()
-                    && (name.eq_ignore_ascii_case(&w.app_name)
-                        || w.title.to_lowercase().contains(&name.to_lowercase()))
+                (!exe_path.is_empty() && w.exe_path.eq_ignore_ascii_case(&exe_path))
+                    || (!w.app_name.is_empty()
+                        && (name.eq_ignore_ascii_case(&w.app_name)
+                            || w.title.to_lowercase().contains(&name.to_lowercase())))
             });
             if let Some(w) = existing {
                 if apps::fullscreen_on(w.hwnd, rect) {
@@ -844,8 +905,8 @@ fn run_action(action: Action, name: &str) {
                 return;
             }
             let before: HashSet<isize> = apps::running_windows().iter().map(|w| w.hwnd).collect();
-            if !apps::shell_open(&lnk) {
-                crate::ui_log(&format!("资源库：打开 {name} 失败（ShellExecute 拒绝）"));
+            if !apps::launch_app(&spec) {
+                crate::ui_log(&format!("资源库：打开 {name} 失败（系统拒绝启动）"));
                 return;
             }
             crate::ui_log(&format!("资源库：正在打开 {name}，等它的窗口出现…"));
@@ -869,7 +930,8 @@ fn run_action(action: Action, name: &str) {
                 let now = apps::running_windows();
                 let fresh: Vec<_> = now.iter().filter(|w| !before.contains(&w.hwnd)).collect();
                 if let Some(w) = fresh.iter().find(|w| {
-                    w.title.to_lowercase().contains(&name.to_lowercase())
+                    (!exe_path.is_empty() && w.exe_path.eq_ignore_ascii_case(&exe_path))
+                        || w.title.to_lowercase().contains(&name.to_lowercase())
                         || name.eq_ignore_ascii_case(&w.app_name)
                 }) {
                     found = Some(w.hwnd);
