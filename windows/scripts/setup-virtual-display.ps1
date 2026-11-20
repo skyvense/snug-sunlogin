@@ -397,7 +397,9 @@ $infPath = $staged.Path
 Log "驱动包已在驱动仓库里：$infPath"
 }
 $diskInf = $null
-foreach ($root in @('C:\VirtualDisplayDriver', "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", $env:ProgramFiles, "$env:USERPROFILE\Downloads")) {
+# 随包优先：发布 zip 里带了钉住版本的驱动（vdd 子目录），脚本目录排第一——
+# 找到就不用再去 GitHub 下载（国内网络下那步最容易失败）
+foreach ($root in @($PSScriptRoot, 'C:\VirtualDisplayDriver', "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", $env:ProgramFiles, "$env:USERPROFILE\Downloads")) {
 if (-not $diskInf -and (Test-Path $root)) {
 $diskInf = Get-ChildItem $root -Recurse -Filter 'MttVDD.inf' -Depth 4 -ErrorAction SilentlyContinue |
 Select-Object -First 1
@@ -486,6 +488,9 @@ return '管道连通（无响应属 25.7.23 已知行为）'
 }
 
 function Get-Nefcon {
+# 随包优先：发布 zip 里带了 nefcon 本体（nefcon 子目录，v1.21.1 x64），有就不用下载
+$bundledNefcon = Join-Path $PSScriptRoot 'nefcon\nefconc.exe'
+if (Test-Path $bundledNefcon) { Log "nefcon 就绪（随包）：$bundledNefcon"; return $bundledNefcon }
 $url = 'https://github.com/nefarius/nefcon/releases/download/v1.21.1/nefcon_v1.21.1.zip'
 $zip = Join-Path $env:TEMP 'nefcon_v1.21.1.zip'
 $dst = Join-Path $env:TEMP 'nefcon-1.21.1'

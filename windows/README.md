@@ -9,6 +9,10 @@ macOS 版的 Windows 对照版。同一仓库、双平台：macOS 代码仍在�
 
 - 虚拟屏：复用开源的 Virtual Display Driver（VDD，已签名；由同捆的
   `setup-virtual-display.ps1` 用官方驱动包 + nefcon 安装），不自研驱动
+  驱动包与 nefcon 均以钉住版本随发布 zip 打包（`vdd/`、`nefcon/` 子目录，
+  源文件在仓库 `windows/assets/`：VDD 取自官方 25.7.23 发布、nefcon v1.21.1 x64，
+  均为 MIT 开源项目），安装脚本优先用随包文件，不必再从 GitHub 下载；
+  只有随包缺失时才回退到在线下载
 - 应用本体（`SnugWindows.exe`，Rust + Win32）：
   - 枚举显示器，找到 VDD 虚拟屏
   - 「创建手机屏」：把所选型号的分辨率写进 VDD 配置（`C:\VirtualDisplayDriver\vdd_settings.xml`，

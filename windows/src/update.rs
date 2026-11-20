@@ -159,12 +159,20 @@ fn prepare(latest: &Latest) -> Result<(), String> {
     }
     // 换文件脚本：等本进程退出 → 覆盖 exe 与安装脚本 → 重新拉起。
     // 本进程是管理员权限，拉起的 PowerShell 子进程继承权限，覆盖无需再提权。
+    // 发布 zip 里有一层版本目录，exe 不在解压根上，要递归找到它所在目录再整套换
     let swap = "param([int]$OldPid, [string]$Src, [string]$Dst)\n\
         Wait-Process -Id $OldPid -Timeout 30 -ErrorAction SilentlyContinue\n\
         Start-Sleep -Milliseconds 600\n\
-        Copy-Item (Join-Path $Src 'SnugWindows.exe') (Join-Path $Dst 'SnugWindows.exe') -Force\n\
-        $s = Join-Path $Src 'setup-virtual-display.ps1'\n\
+        $exe = Get-ChildItem $Src -Recurse -Filter 'SnugWindows.exe' | Select-Object -First 1\n\
+        if (-not $exe) { return }\n\
+        $from = $exe.Directory.FullName\n\
+        Copy-Item $exe.FullName (Join-Path $Dst 'SnugWindows.exe') -Force\n\
+        $s = Join-Path $from 'setup-virtual-display.ps1'\n\
         if (Test-Path $s) { Copy-Item $s (Join-Path $Dst 'setup-virtual-display.ps1') -Force }\n\
+        foreach ($d in @('vdd', 'nefcon')) {\n\
+        $sd = Join-Path $from $d\n\
+        if (Test-Path $sd) { Copy-Item $sd (Join-Path $Dst $d) -Recurse -Force }\n\
+        }\n\
         Start-Process (Join-Path $Dst 'SnugWindows.exe')\n";
     let swap_path = dir.join("swap.ps1");
     std::fs::write(&swap_path, swap).map_err(|e| format!("写换文件脚本失败：{e}"))?;

@@ -165,6 +165,9 @@ jobs:
           Copy-Item windows/target/x86_64-pc-windows-msvc/release/SnugWindows.exe $stage/
           Copy-Item windows/scripts/setup-virtual-display.ps1 $stage/
           Copy-Item windows/README.md $stage/
+          # 随包驱动与 nefcon：钉住版本打包进 zip，安装脚本优先用随包的，不再依赖 GitHub 下载
+          Copy-Item windows/assets/vdd $stage/vdd -Recurse
+          Copy-Item windows/assets/nefcon $stage/nefcon -Recurse
           $zip = "$stage.zip"
           Compress-Archive -Path $stage -DestinationPath $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
