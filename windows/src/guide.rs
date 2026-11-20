@@ -15,6 +15,7 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM}
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{EM_SCROLLCARET, EM_SETSEL};
+use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const CLASS_NAME: &str = "SnugSunloginGuideWindow";
@@ -79,6 +80,9 @@ struct GuideState {
     verify_for: VerifyFor,
     after_install: bool,
     text: String,
+    /// 动作按钮是否在闪烁（可点状态的提醒），以及当前闪到哪一态
+    flashing: bool,
+    flash_phase: bool,
 }
 
 thread_local! {
@@ -158,16 +162,59 @@ pub fn open(parent: HWND) {
     }
 }
 
-/// 启用/禁用按钮：windows 0.59 里 EnableWindow 不在常用路径下，直接改 WS_DISABLED 样式位
+/// 启用/禁用按钮。EnableWindow 在 windows 0.59 里挂在 Input::KeyboardAndMouse 下，
+/// 不在 WindowsAndMessaging——之前改 WS_DISABLED 样式位的做法不触发按钮重绘，
+/// 按钮亮不起来，必须走这个正道。
 fn set_enabled(hwnd: HWND, on: bool) {
     unsafe {
-        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
-        let new = if on {
-            style & !WS_DISABLED.0
+        let _ = EnableWindow(hwnd, on);
+    }
+}
+
+const TIMER_FLASH: usize = 9;
+
+/// 按钮闪烁：可点状态下用定时器翻转 BS_DEFPUSHBUTTON（粗边框），
+/// 一亮一暗地提醒「现在点我」。点下或变忙即停。
+fn set_flash(on: bool) {
+    let (hwnd, action) = GUIDE.with(|c| {
+        let mut cell = c.borrow_mut();
+        match cell.as_mut() {
+            Some(s) => {
+                s.flashing = on;
+                s.flash_phase = false;
+                (Some(s.hwnd), Some(s.action))
+            }
+            None => (None, None),
+        }
+    });
+    let (Some(hwnd), Some(action)) = (hwnd, action) else {
+        return;
+    };
+    unsafe {
+        if on {
+            SetTimer(Some(hwnd), TIMER_FLASH, 550, None);
         } else {
-            style | WS_DISABLED.0
-        };
-        SetWindowLongW(hwnd, GWL_STYLE, new as i32);
+            let _ = KillTimer(Some(hwnd), TIMER_FLASH);
+            set_def_style(action, false);
+        }
+    }
+}
+
+/// 给按钮加/去默认按钮粗边框（闪烁的两态），改完样式要 SWP_FRAMECHANGED 才生效
+fn set_def_style(btn: HWND, def: bool) {
+    unsafe {
+        let style = GetWindowLongW(btn, GWL_STYLE) as u32 & !0xF;
+        SetWindowLongW(btn, GWL_STYLE, (style | if def { 1 } else { 0 }) as i32);
+        let _ = SetWindowPos(
+            btn,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        );
+        let _ = InvalidateRect(Some(btn), None, true);
     }
 }
 
@@ -179,6 +226,8 @@ fn set_action(label: &str, enabled: bool) {
             SetWindowTextW(action, PCWSTR(text_w.as_ptr()));
         }
         set_enabled(action, enabled);
+        // 能点了就闪，忙起来就停
+        set_flash(enabled);
     }
 }
 
@@ -588,6 +637,8 @@ unsafe extern "system" fn guide_wnd_proc(
                     verify_for: VerifyFor::Create,
                     after_install: false,
                     text: String::new(),
+                    flashing: false,
+                    flash_phase: false,
                 });
             });
             set_text(
@@ -596,6 +647,24 @@ unsafe extern "system" fn guide_wnd_proc(
                  创建、删除各验证一遍 → 最后打开测试画面看串流。\n\n正在检查…",
             );
             start_check(hwnd.0 as usize);
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            if wparam.0 == TIMER_FLASH {
+                let action = GUIDE.with(|c| {
+                    let mut cell = c.borrow_mut();
+                    match cell.as_mut() {
+                        Some(s) if s.flashing => {
+                            s.flash_phase = !s.flash_phase;
+                            Some((s.action, s.flash_phase))
+                        }
+                        _ => None,
+                    }
+                });
+                if let Some((action, phase)) = action {
+                    set_def_style(action, phase);
+                }
+            }
             LRESULT(0)
         }
         WM_COMMAND => {
@@ -733,6 +802,9 @@ unsafe extern "system" fn guide_wnd_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
+            unsafe {
+                let _ = KillTimer(Some(hwnd), TIMER_FLASH);
+            }
             GUIDE.with(|c| {
                 *c.borrow_mut() = None;
             });
