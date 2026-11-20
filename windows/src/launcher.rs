@@ -773,6 +773,44 @@ fn icon_cached(path: &str) -> Option<isize> {
 
 // MARK: 动作
 
+/// 请求关闭一个窗口（WM_CLOSE；应用可以不理会——关没关掉，刷新后的列表一目了然，不假报）。
+fn close_window(hwnd: HWND, target: isize, title: &str) {
+    unsafe {
+        let _ = PostMessageW(
+            Some(HWND(target as *mut core::ffi::c_void)),
+            WM_CLOSE,
+            WPARAM(0),
+            LPARAM(0),
+        );
+    }
+    crate::ui_log(&format!("资源库：已请求关闭窗口「{title}」"));
+    pump(350);
+    refresh_running(hwnd);
+}
+
+/// 重扫运行中窗口（关窗后列表立刻对上现实），清掉已消失 App 的展开状态并钳住滚动。
+fn refresh_running(hwnd: HWND) {
+    LAUNCHER.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.running = apps::running_windows();
+            let keys: HashSet<String> = s.running.iter().map(app_key_of).collect();
+            s.expanded.retain(|k| keys.contains(k));
+            let items = current_items(s);
+            let mut rc = RECT::default();
+            unsafe {
+                let _ = GetClientRect(hwnd, &mut rc);
+            }
+            let max_scroll = (content_height(s.tab, items.len(), rc.right - rc.left)
+                - (rc.bottom - rc.top - CONTENT_TOP))
+            .max(0);
+            s.scroll = s.scroll.clamp(0, max_scroll);
+        }
+    });
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
 fn run_action(action: Action, name: &str) {
     let rect = LAUNCHER.with(|c| c.borrow().as_ref().map(|s| s.rect));
     let Some(rect) = rect else { return };
@@ -1225,21 +1263,51 @@ unsafe extern "system" fn launcher_proc(
                 }
                 return LRESULT(0);
             }
+            enum Hit {
+                Run(Action, String),
+                Toggle(String),
+                Close(isize, String),
+            }
             let hit = LAUNCHER.with(|c| {
                 let cell = c.borrow();
                 let s = cell.as_ref()?;
                 let items = current_items(s);
                 items.iter().enumerate().find_map(|(i, item)| {
                     let r = item_rect(s.tab, s.scroll, i, w);
-                    if x >= r.left && x < r.right && y >= r.top && y < r.bottom {
-                        Some((item.action.clone(), item.name.clone()))
-                    } else {
-                        None
+                    if !(x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+                        return None;
                     }
+                    let inside =
+                        |b: RECT| x >= b.left && x < b.right && y >= b.top && y < b.bottom;
+                    if let (Some(cr), Some(t)) = (close_btn_rect(item, r, w), item.close_hwnd) {
+                        if inside(cr) {
+                            return Some(Hit::Close(t, item.name.clone()));
+                        }
+                    }
+                    if let Some(er) = expand_chip_rect(item, r, w) {
+                        if inside(er) {
+                            return Some(Hit::Toggle(item.app_key.clone()));
+                        }
+                    }
+                    Some(Hit::Run(item.action.clone(), item.name.clone()))
                 })
             });
-            if let Some((action, name)) = hit {
-                run_action(action, &name);
+            match hit {
+                Some(Hit::Run(action, name)) => run_action(action, &name),
+                Some(Hit::Toggle(key)) => {
+                    LAUNCHER.with(|c| {
+                        if let Some(s) = c.borrow_mut().as_mut() {
+                            if !s.expanded.remove(&key) {
+                                s.expanded.insert(key);
+                            }
+                        }
+                    });
+                    unsafe {
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                Some(Hit::Close(target, title)) => close_window(hwnd, target, &title),
+                None => {}
             }
             LRESULT(0)
         }
