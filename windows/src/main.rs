@@ -1320,6 +1320,24 @@ fn spawn_driver_check(hwnd_raw: usize) {
     });
 }
 
+/// 拆屏前把远程期间被改过尺寸/位置的窗口恢复原样（登记在 apps 里：
+/// 连入时普查快照 + 全屏窗口时逐个登记，还原规则见 apps::restore_saved_places）。
+fn restore_session_windows() {
+    let vrect = display::list()
+        .iter()
+        .find(|d| d.is_virtual())
+        .map(|d| windows::Win32::Foundation::RECT {
+            left: d.x,
+            top: d.y,
+            right: d.x + d.width as i32,
+            bottom: d.y + d.height as i32,
+        });
+    let n = apps::restore_saved_places(vrect);
+    if n > 0 {
+        ui_log(&format!("已把 {n} 个窗口恢复到远程开始前的尺寸与位置"));
+    }
+}
+
 /// 按当前客户区重排一遍控件（模式切换后按钮行要出现/消失，跟一次布局）。
 fn relayout(hwnd: HWND) {
     let mut rc = windows::Win32::Foundation::RECT::default();
@@ -1848,6 +1866,8 @@ unsafe extern "system" fn main_wnd_proc(
         }
         session::WM_SESSION_START => {
             ui_log("检测到向日葵主控连入（desktopagent 进程已启动）");
+            // 先给所有窗口拍一张「远程前」的快照：期间被改过的尺寸，断开时照此还原
+            apps::snapshot_all_windows();
             let (auto, has_virtual) = MAIN.with(|c| {
                 c.borrow()
                     .as_ref()
@@ -1882,6 +1902,8 @@ unsafe extern "system" fn main_wnd_proc(
             if auto && owned && has_virtual {
                 ui_log("自动关闭资源库并移除手机屏…");
                 launcher::close_all();
+                // 先还原窗口再拆屏：屏一拆，留在上面的窗口会被系统胡乱塞位置
+                restore_session_windows();
                 remove_phone_screen();
                 set_screen_owner(false);
             } else {
@@ -1964,6 +1986,7 @@ unsafe extern "system" fn main_wnd_proc(
                 }
                 ID_REMOVE => {
                     set_screen_owner(false);
+                    restore_session_windows();
                     remove_phone_screen();
                 }
                 ID_TEST => toggle_test_window(),

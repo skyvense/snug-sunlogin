@@ -8,10 +8,11 @@
 //!   挪完读回窗口矩形验证中心点落没落在目标屏内，没落位重试一次，结果如实返回给调用方记日志
 
 use crate::display::wide;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use windows::core::{Interface, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, POINT, RECT};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER,
     CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
@@ -181,6 +182,110 @@ pub fn running_windows() -> Vec<RunningWindow> {
         );
     }
     out
+}
+
+// MARK: 窗口尺寸登记与恢复（远程期间被改过的窗口，断开时还原）
+
+/// 一个窗口在远程开始前的样子：普通状态矩形 + 是否最大化。
+struct SavedPlace {
+    rect: RECT,
+    maximized: bool,
+    /// 被我们全屏到虚拟屏过：断开时无条件还原。
+    /// false 是连入时的普查快照：只还原断开时还停在虚拟屏上的（被用户在远程期间挪过去的）。
+    touched: bool,
+}
+
+static SAVED_PLACES: Mutex<Option<HashMap<isize, SavedPlace>>> = Mutex::new(None);
+
+/// 读一个窗口当前的普通矩形与最大化状态（WINDOWPLACEMENT 的 rcNormalPosition/showCmd）。
+fn current_place(hwnd: HWND) -> Option<(RECT, bool)> {
+    unsafe {
+        let mut wp = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        GetWindowPlacement(hwnd, &mut wp).ok()?;
+        Some((wp.rcNormalPosition, wp.showCmd == SW_SHOWMAXIMIZED.0 as u32))
+    }
+}
+
+/// 登记一个窗口的原始位置（首次登记为准，之后只补 touched 标记，不覆盖原矩形）。
+pub fn record_place(hwnd: isize, touched: bool) {
+    let h = HWND(hwnd as *mut core::ffi::c_void);
+    unsafe {
+        if !IsWindow(h).as_bool() {
+            return;
+        }
+    }
+    let Some((rect, maximized)) = current_place(h) else {
+        return;
+    };
+    let mut guard = SAVED_PLACES.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    match map.get_mut(&hwnd) {
+        Some(e) => {
+            if touched {
+                e.touched = true;
+            }
+        }
+        None => {
+            map.insert(
+                hwnd,
+                SavedPlace {
+                    rect,
+                    maximized,
+                    touched,
+                },
+            );
+        }
+    }
+}
+
+/// 连入时普查：把当前所有运行中窗口的位置登记为原样（已登记的不覆盖）。
+pub fn snapshot_all_windows() {
+    for w in running_windows() {
+        record_place(w.hwnd, false);
+    }
+}
+
+/// 拆屏前还原：登记过且（被我们全屏过 || 此刻还停在虚拟屏上）的窗口，
+/// 按登记的原矩形与最大化状态用 SetWindowPlacement 还原。还原后清空登记表。
+/// 返回实际还原的个数，调用方据此记日志。
+pub fn restore_saved_places(virtual_rect: Option<RECT>) -> usize {
+    let map = SAVED_PLACES
+        .lock()
+        .unwrap()
+        .take()
+        .unwrap_or_default();
+    let mut n = 0;
+    for (hwnd_raw, saved) in map {
+        let h = HWND(hwnd_raw as *mut core::ffi::c_void);
+        unsafe {
+            if !IsWindow(h).as_bool() {
+                continue;
+            }
+            let on_virtual = virtual_rect.map(|vr| window_center_in(h, vr)).unwrap_or(false);
+            if !saved.touched && !on_virtual {
+                continue;
+            }
+            let wp = WINDOWPLACEMENT {
+                length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+                flags: WINDOWPLACEMENT_FLAGS(0),
+                showCmd: if saved.maximized {
+                    SW_SHOWMAXIMIZED.0 as u32
+                } else {
+                    SW_SHOWNORMAL.0 as u32
+                },
+                ptMinPosition: POINT { x: -1, y: -1 },
+                ptMaxPosition: POINT { x: -1, y: -1 },
+                rcNormalPosition: saved.rect,
+            };
+            if SetWindowPlacement(h, &wp).is_ok() {
+                n += 1;
+            }
+        }
+    }
+    n
 }
 
 /// 「全部」列表 = 开始菜单快捷方式（解析出目标 exe）∪ shell 的 AppsFolder。
@@ -542,6 +647,8 @@ pub fn shell_open(path: &str) -> bool {
 /// 还原/最大化都是异步的：给它一点时间再读回矩形验，没落位重试一次。
 /// 返回是否落位——调用方按结果如实记日志，不许假报成功。
 pub fn fullscreen_on(hwnd: isize, rect: RECT) -> bool {
+    // 动它之前先把原位置登记下来（首次为准），远程断开时按登记还原
+    record_place(hwnd, true);
     let hwnd = HWND(hwnd as *mut core::ffi::c_void);
     unsafe {
         for _ in 0..2 {
