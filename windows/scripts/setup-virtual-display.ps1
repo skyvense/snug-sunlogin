@@ -440,95 +440,119 @@ Log '下载最新版的驱动 zip 解压（或含 VDD Control 的 zip），把�
 $script:ExitCode = 1
 }
 
-# ================= 四、设备节点 =================
+# ================= 四、驱动活性与设备重建 =================
+function Test-VddPipe {
+try {
+$pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'MTTVirtualDisplayPipe', [System.IO.Pipes.PipeDirection]::InOut)
+$pipe.Connect(700)
+$bytes = [Text.Encoding]::Unicode.GetBytes('PING')
+$pipe.Write($bytes, 0, $bytes.Length)
+$pipe.Flush()
+$buf = New-Object byte[] 64
+$resp = ''
+try {
+$pipe.ReadTimeout = 700
+$n = $pipe.Read($buf, 0, 64)
+if ($n -gt 0) { $resp = [Text.Encoding]::ASCII.GetString($buf, 0, $n)}
+} catch {}
+$pipe.Dispose()
+if ($resp) { return "管道连通，响应：$resp"}
+return '管道连通（无响应属 25.7.23 已知行为）'
+} catch { return $null}
+}
+
+function Get-Nefcon {
+$url = 'https://github.com/nefarius/nefcon/releases/download/v1.21.1/nefcon_v1.21.1.zip'
+$zip = Join-Path $env:TEMP 'nefcon_v1.21.1.zip'
+$dst = Join-Path $env:TEMP 'nefcon-1.21.1'
+try {
+if (-not (Test-Path $zip)) { Invoke-WebRequest $url -OutFile $zip -TimeoutSec 120}
+$hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+if ($hash -ne '28292F4B1417484DB6AD23C47FFC18EA99D3DE3BDB3BBBE60C8ED11703A3780A') {
+Log "nefcon 包哈希对不上（$hash），不用它"
+return $null
+}
+if (Test-Path $dst) { Remove-Item $dst -Recurse -Force}
+Expand-Archive $zip -DestinationPath $dst -Force
+$exe = Join-Path $dst 'x64\nefconc.exe'
+if (Test-Path $exe) { Log "nefcon 就绪（SHA256 已验，与参考实现钉住的哈希一致）：$exe"; return $exe}
+Log 'nefcon 解压后没找到 x64\nefconc.exe'
+} catch { Log "下载 nefcon 失败：$($_.Exception.Message)"}
+return $null
+}
+
+function Ensure-PackageDir {
+if ($infPath) {
+$d = Split-Path $infPath -Parent
+if ((Test-Path (Join-Path $d 'MttVDD.dll')) -and (Test-Path (Join-Path $d 'mttvdd.cat'))) { return $d}
+}
+try {
+$rel = Invoke-RestMethod 'https://api.github.com/repos/VirtualDrivers/Virtual-Display-Driver/releases/latest' -Headers @{ 'User-Agent' = 'SnugSetup'} -TimeoutSec 30
+$asset = $rel.assets | Where-Object { $_.name -match '\.zip$' -and $_.name -notmatch 'Control'} |
+Sort-Object { if ($_.name -match 'Driver') { 0} else { 1}} | Select-Object -First 1
+$zip = Join-Path $env:TEMP 'vdd-pkg.zip'
+$dst = Join-Path $env:TEMP 'vdd-pkg'
+Invoke-WebRequest $asset.browser_download_url -OutFile $zip -TimeoutSec 300
+if (Test-Path $dst) { Remove-Item $dst -Recurse -Force}
+Expand-Archive $zip -DestinationPath $dst -Force
+$inf = Get-ChildItem $dst -Recurse -Filter 'MttVDD.inf' | Select-Object -First 1
+if ($inf) { return $inf.Directory.FullName}
+} catch { Log "重新下载驱动包失败：$($_.Exception.Message)"}
+return $null
+}
+
 $vdd = $null
 if ($script:ExitCode -eq 0) {
-Section '四、VDD 设备节点（Root\MttVDD）'
+Section '四、驱动活性检查与设备重建（nefcon）'
+$pipe0 = Test-VddPipe
+if ($pipe0) { Log "驱动活性：$pipe0"} else { Log '驱动活性：MTTVirtualDisplayPipe 连不上——驱动 DLL 没在工作（设备管理器显示 OK 只是反射器的状态）'}
 $vdd = Find-VddDevice
 if ($vdd) {
-Log "设备节点已存在：$($vdd.FriendlyName) | 实例 $($vdd.InstanceId) | 状态 $($vdd.Status) | 问题码 $(Get-ProblemCode $vdd.InstanceId) | 驱动 INF $(Get-DriverInfPath $vdd.InstanceId)"
+Log "设备现状：$($vdd.FriendlyName) | $($vdd.InstanceId) | 状态 $($vdd.Status) | 问题码 $(Get-ProblemCode $vdd.InstanceId) | 驱动 INF $(Get-DriverInfPath $vdd.InstanceId)"
 }
-if (-not $vdd -and $infPath) {
-Log '没有节点：pnputil 再装一次后重找…'
-pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
-Start-Sleep -Seconds 2
+$needRebuild = (-not $vdd) -or (-not $pipe0)
+if ($needRebuild) {
+Log '按参考实现（snug-for-windows，已验证可行）的做法，用 nefcon 重建设备节点：'
+$nef = Get-Nefcon
+$pkg = Ensure-PackageDir
+if ($nef -and $pkg) {
+if (-not (Test-Path 'C:\VirtualDisplayDriver')) { New-Item -ItemType Directory -Force 'C:\VirtualDisplayDriver' | Out-Null}
+Copy-Item (Join-Path $pkg 'MttVDD.inf') 'C:\VirtualDisplayDriver\' -Force
+Copy-Item (Join-Path $pkg 'MttVDD.dll') 'C:\VirtualDisplayDriver\' -Force
+Copy-Item (Join-Path $pkg 'mttvdd.cat') 'C:\VirtualDisplayDriver\' -Force
+Log '驱动三件套已放到 C:\VirtualDisplayDriver（参考实现的布局，nefcon 从这里装）'
+$rootInf = 'C:\VirtualDisplayDriver\MttVDD.inf'
+if ($vdd) {
+Log '先摘掉现有的半成品节点…'
+& $nef remove 'Root\MttVDD' 2>&1 | ForEach-Object { Log " nefcon: $_"}
+Log "nefcon remove 退出码 $LASTEXITCODE"
+for ($i = 0; $i -lt 20; $i++) {
 $vdd = Find-VddDevice
+if (-not $vdd) { break}
+Start-Sleep -Milliseconds 500
 }
-if (-not $vdd -and $infPath) {
-Log '仍没有节点：用 SetupAPI 程序化创建（devcon install 的等价做法）…'
-$r = [SnugWinDevNode]::CreateRootDevice('MttVDD', 'Root\MttVDD', $infPath, 'Virtual Display Driver')
-Log "创建结果：$r"
-Log '注：若上面报 ERROR_NO_SUCH_DEVINST(0xE000020B)，是绑驱动那步没找到刚建的节点，不代表节点没建出来——下面先找节点，找到了走补绑阶梯。'
-for ($i = 1; $i -le 5 -and -not $vdd; $i++) {
-Start-Sleep -Seconds 2
+Log "摘除后设备：$(if ($vdd) { '还在'} else { '已消失'})"
+}
+Log '用 nefcon 建节点并装驱动…'
+& $nef install $rootInf 'Root\MttVDD' '--no-duplicates' 2>&1 | ForEach-Object { Log " nefcon: $_"}
+Log "nefcon install 退出码 $LASTEXITCODE（3010 表示需要重启）"
+$pipe1 = $null
+for ($i = 1; $i -le 10; $i++) {
+Start-Sleep -Seconds 3
 $vdd = Find-VddDevice
-Log " 创建后第 $i 次找设备：$(if ($vdd) { '找到了'} else { '还没有'})"
+$pipe1 = Test-VddPipe
+if ($vdd -and $pipe1) { break}
+Log " 重建后第 $i 次检查：设备 $(if ($vdd) { '在'} else { '不在'})，管道 $(if ($pipe1) { '通'} else { '不通'})"
+}
+if ($vdd) { Log "重建后设备：状态 $($vdd.Status) | 问题码 $(Get-ProblemCode $vdd.InstanceId) | 驱动 INF $(Get-DriverInfPath $vdd.InstanceId)"}
+if ($pipe1) { Log "重建后活性：$pipe1"} else { Log '重建后管道仍不通——驱动 DLL 还是没起来，第六段会把系统事件一并转储'}
+} else {
+Log 'nefcon 或驱动包没就位，跳过重建（细节见上面几行）'
 }
 }
 if (-not $vdd) {
-Log '【受阻】设备节点还是没建出来。兜底办法：用官方的 VDD Control 工具建——'
-Log ' 1) 打开 https://github.com/VirtualDrivers/Virtual-Display-Driver/releases'
-Log ' 2) 下最新版里名字含 VDD Control 的 zip，解压，右键管理员运行，点 Install'
-Log ' 3) 装完重跑本脚本，它会接着把配置和验证做完'
-Log '如果 VDC 的 Install 也失败，把本日志发我，并留意腾讯电脑管家是否弹了拦截提示。'
+Log '设备节点不在。把本日志发我；兜底仍是官方 VDD Control 的 Install 按钮。'
 $script:ExitCode = 1
-} else {
-$pc = Get-ProblemCode $vdd.InstanceId
-$drvInf = Get-DriverInfPath $vdd.InstanceId
-Log "节点现状：状态 $($vdd.Status) | 问题码 $pc | 驱动 INF $drvInf"
-if ($vdd.Status -eq 'OK' -and $pc -eq 0) {
-Log '设备状态 OK、问题码 0：驱动已绑好（这个 UMDF 设备的驱动 INF 属性本来就是空的，不当作没绑）'
-} elseif ($pc -eq 28 -or -not $drvInf) {
-Log '节点在、驱动没绑上（问题码 28），依次尝试补绑，每步后复查：'
-Log ' 尝试 A：pnputil /add-driver /install（节点已存在时它能匹配上）'
-pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
-Start-Sleep -Seconds 2
-$vdd = Find-VddDevice
-$pc = Get-ProblemCode $vdd.InstanceId
-$drvInf = Get-DriverInfPath $vdd.InstanceId
-Log " A 后：问题码 $pc | 驱动 INF $drvInf"
-if ($pc -eq 28 -or -not $drvInf) {
-Log ' 尝试 B：pnputil /scan-devices 让 PnP 重新枚举'
-pnputil.exe /scan-devices 2>&1 | ForEach-Object { Log " pnputil: $_"}
-Start-Sleep -Seconds 3
-$vdd = Find-VddDevice
-$pc = Get-ProblemCode $vdd.InstanceId
-$drvInf = Get-DriverInfPath $vdd.InstanceId
-Log " B 后：问题码 $pc | 驱动 INF $drvInf"
-}
-if ($pc -eq 28 -or -not $drvInf) {
-Log ' 尝试 C：DiInstallDevice 按实例把仓库里的驱动直接绑上'
-$r2 = [SnugWinDevNode]::InstallStagedDriver($vdd.InstanceId)
-Log " C 结果：$r2"
-Start-Sleep -Seconds 2
-$vdd = Find-VddDevice
-$pc = Get-ProblemCode $vdd.InstanceId
-$drvInf = Get-DriverInfPath $vdd.InstanceId
-Log " C 后：问题码 $pc | 驱动 INF $drvInf"
-}
-}
-$pc = Get-ProblemCode $vdd.InstanceId
-if ($pc -eq 22) {
-Log '设备被禁用（问题码 22），正在启用…'
-pnputil.exe /enable-device $vdd.InstanceId 2>&1 | ForEach-Object { Log " pnputil: $_"}
-Start-Sleep -Seconds 2
-$vdd = Find-VddDevice
-Log "启用后：状态 $($vdd.Status)，问题码 $(Get-ProblemCode $vdd.InstanceId)"
-} elseif ($pc -eq 28) {
-Log '【受阻】补绑阶梯走完，驱动还是没绑上（问题码 28）。把本日志发我；也可以先在设备管理器里对这个设备手动「更新驱动程序 → 自动搜索」试一次。'
-$script:ExitCode = 1
-} elseif ($pc -and $pc -ne 0) {
-$hint = switch ($pc) {
-52 { '驱动签名验证失败：可能被内存完整性/安全启动策略拦截'}
-39 { '驱动加载失败：多半是缺 VC++ 运行时（看第一段日志）'}
-37 { '驱动初始化失败：多半是缺 VC++ 运行时（看第一段日志）'}
-31 { '驱动加载失败：多半是缺 VC++ 运行时（看第一段日志）'}
-43 { '设备自己报告了问题：重启设备或电脑后再看'}
-10 { '设备无法启动：看驱动日志与 VC++ 运行时'}
-default { '未归类的问题码，原文记录在上一行'}
-}
-Log "设备带问题码 $pc：$hint。本脚本继续往下走（写配置+重启设备），最后以虚拟屏是否出现为准。"
-}
 }
 }
 
@@ -536,65 +560,62 @@ Log "设备带问题码 $pc：$hint。本脚本继续往下走（写配置+重�
 $script:DefaultSettingsXml = @'
 <?xml version='1.0' encoding='utf-8'?>
 <vdd_settings>
-    <monitors>
-        <count>1</count>
-    </monitors>
-    <gpu>
-        <friendlyname>default</friendlyname>
-    </gpu>
-	<global>
-		<!--These are global refreshrates, any you add in here, will be replicated to all resolutions-->
-		<g_refresh_rate>60</g_refresh_rate>
-		<g_refresh_rate>90</g_refresh_rate>
-		<g_refresh_rate>120</g_refresh_rate>
-		<g_refresh_rate>144</g_refresh_rate>
-		<g_refresh_rate>165</g_refresh_rate>
-		<g_refresh_rate>244</g_refresh_rate>
-	</global>
-    <resolutions>
-        <resolution>
-            <width>800</width>
-            <height>600</height>
-            <refresh_rate>30</refresh_rate>
-        </resolution>
-        <resolution>
-            <width>1366</width>
-            <height>768</height>
-            <refresh_rate>30</refresh_rate>
-        </resolution>
-        <resolution>
-            <width>1920</width>
-            <height>1080</height>
-            <refresh_rate>30</refresh_rate>
-        </resolution>
-        <resolution>
-            <width>2560</width>
-            <height>1440</height>
-            <refresh_rate>30</refresh_rate>
-        </resolution>
-        <resolution>
-            <width>3840</width>
-            <height>2160</height>
-            <refresh_rate>30</refresh_rate>
-        </resolution>
-    
-        
-    </resolutions>
-    <options>
-		<CustomEdid>false</CustomEdid> <!-- Custom Edid should be named "user_edid.bin"! This does not support emulating resolutions!-->
-		<PreventSpoof>false</PreventSpoof> <!--Enable this to prevent manufacturer spoofing when using custom edid. Please only do so if you need to!-->
-		<EdidCeaOverride>false</EdidCeaOverride> <!--Enable this to override or add hard coded cea-extension block to custom Edid support allowing you to enable HDR-->
-		<HardwareCursor>true</HardwareCursor>
-		<SDR10bit>false</SDR10bit>
-		<HDRPlus>false</HDRPlus> <!-- If you have SDR10 bit enabled, HDRPlus wont work - there’s a conflict because the display system cannot simultaneously handle both high dynamic range 12-bit and standard dynamic range 10-bit settings. -->
-		<logging>false</logging>
-        <!-- DEBUG LOGGING FOR EXPERTS ONLY!-->
-        <debuglogging>false</debuglogging> 
-        <!-- DEBUG LOGS CAN GENERATE 1000+ LINES-->
-		<!-- Warning: Leaving logging on too long can lead to excessive filesize. Especially DebugLogging, which should only be used for short periods to log errors. -->
-		<!-- Logging: Useful to troubleshoot and determine which GPUs are being used, and if displays are working as intended.-->
-		<!-- Debug Logging: Logs local system information with every driver function/event/process. Useful for GitHub Help Tickets.-->
-	</options>
+<monitors>
+<count>1</count>
+</monitors>
+<gpu>
+<friendlyname>default</friendlyname>
+</gpu>
+<global>
+<g_refresh_rate>60</g_refresh_rate>
+<g_refresh_rate>90</g_refresh_rate>
+<g_refresh_rate>120</g_refresh_rate>
+<g_refresh_rate>144</g_refresh_rate>
+</global>
+<resolutions>
+<resolution>
+<width>1920</width>
+<height>1080</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+<resolution>
+<width>2560</width>
+<height>1440</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+<resolution>
+<width>3840</width>
+<height>2160</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+<resolution>
+<width>1080</width>
+<height>2346</height>
+<refresh_rate>60</refresh_rate>
+</resolution>
+</resolutions>
+<logging>
+<SendLogsThroughPipe>true</SendLogsThroughPipe>
+<logging>true</logging>
+<debuglogging>false</debuglogging>
+</logging>
+<colour>
+<SDR10bit>false</SDR10bit>
+<HDRPlus>false</HDRPlus>
+<ColourFormat>RGB</ColourFormat>
+</colour>
+<cursor>
+<HardwareCursor>true</HardwareCursor>
+<CursorMaxX>128</CursorMaxX>
+<CursorMaxY>128</CursorMaxY>
+<AlphaCursorSupport>true</AlphaCursorSupport>
+<XorCursorSupportLevel>2</XorCursorSupportLevel>
+</cursor>
+<edid>
+<CustomEdid>false</CustomEdid>
+<PreventSpoof>false</PreventSpoof>
+<EdidCeaOverride>false</EdidCeaOverride>
+</edid>
 </vdd_settings>
 '@
 
@@ -603,27 +624,66 @@ $dir = 'C:\VirtualDisplayDriver'
 $path = Join-Path $dir 'vdd_settings.xml'
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
 $enc = New-Object Text.UTF8Encoding $false
-if (Test-Path $path) {
-$cur = [IO.File]::ReadAllText($path)
-Log '—— 当前 vdd_settings.xml 全文（出问题时这是第一手证据）——'
-foreach ($ln in ($cur -split "`r?`n")) { Log "  | $ln" }
-Log '—— 全文结束 ——'
-if ($cur.Contains('<options>') -and $cur.Contains('<width>1080</width>') -and $cur.Contains('<logging>true</logging>')) {
-Log '当前配置已是随包结构（<options> 节）且含 1080×2346 与 logging=true，无需改写'
+if (-not (Test-Path $path)) {
+[IO.File]::WriteAllText($path, $script:DefaultSettingsXml, $enc)
+Log "配置文件不存在，已按参考实现同款结构新建：$path（分节结构、含 1080×2346、logging=true）"
 return
 }
-$bak3 = "$path.pre-v3.bak"
-if (-not (Test-Path $bak3)) { Copy-Item $path $bak3; Log "原配置已另备份为 $bak3" }
-Log '当前配置不是 25.7.23 随包结构：做 A/B——换成驱动包自带的默认配置（只加 1080×2346 并打开 logging），重启设备看虚拟屏出不出来'
-} else {
-Log '配置文件不存在：直接写随包默认配置（加 1080×2346、打开 logging）'
+$bak = "$path.setup-script.bak"
+if (-not (Test-Path $bak)) { Copy-Item $path $bak; Log "原配置已备份为 $bak" }
+$cur = [IO.File]::ReadAllText($path)
+Log '—— 当前 vdd_settings.xml 全文 ——'
+foreach ($ln in ($cur -split "`r?`n")) { Log "  | $ln" }
+Log '—— 全文结束 ——'
+if ($cur.Contains('<options>')) {
+$bak4 = "$path.pre-v4.bak"
+if (-not (Test-Path $bak4)) { Copy-Item $path $bak4; Log "原配置已另备份为 $bak4" }
+[IO.File]::WriteAllText($path, $script:DefaultSettingsXml, $enc)
+Log '当前配置是驱动包 zip 里的 <options> 老结构，已换成参考实现同款的分节结构（现行驱动认的是这套）'
+return
 }
-$text = $script:DefaultSettingsXml
-$block = "<resolution>`n            <width>1080</width>`n            <height>2346</height>`n            <refresh_rate>60</refresh_rate>`n        </resolution>`n        "
+$text = $cur
+$orig = $cur
+$m = [regex]::Match($text, '(?s)<monitors>.*?</monitors>')
+if ($m.Success) {
+$seg = $m.Value
+$cm = [regex]::Match($seg, '<count>\s*(\d+)\s*</count>')
+if ($cm.Success) {
+if ([int]$cm.Groups[1].Value -lt 1) {
+$seg = $seg -replace '<count>\s*\d+\s*</count>', '<count>1</count>'
+$text = $text.Substring(0, $m.Index) + $seg + $text.Substring($m.Index + $m.Length)
+Log 'monitors/count 原本小于 1，已改为 1'
+}
+} else {
+$seg = $seg -replace '<monitors>', '<monitors><count>1</count>'
+$text = $text.Substring(0, $m.Index) + $seg + $text.Substring($m.Index + $m.Length)
+Log 'monitors 里没有 count，已补 <count>1</count>'
+}
+} else {
+$text = $text -replace '(<vdd_settings[^>]*>)', '$1<monitors><count>1</count></monitors>'
+Log '没有 monitors 节点，已补上'
+}
+if (-not ($text -match '<width>1080</width>' -and $text -match '<height>2346</height>')) {
+$block = "<resolution>`n <width>1080</width>`n <height>2346</height>`n <refresh_rate>60</refresh_rate>`n </resolution>`n "
+if ($text.Contains('</resolutions>')) {
 $text = $text.Replace('</resolutions>', $block + '</resolutions>')
+} elseif ($text.Contains('</vdd_settings>')) {
+$text = $text.Replace('</vdd_settings>', "<resolutions>`n $block</resolutions>`n</vdd_settings>")
+}
+Log '已往配置加入 1080×2346@60 分辨率'
+} else {
+Log '配置里已有 1080×2346 分辨率'
+}
+if ($text.Contains('<logging>false</logging>')) {
 $text = $text.Replace('<logging>false</logging>', '<logging>true</logging>')
+Log '已打开驱动 logging（它会往 C:\VirtualDisplayDriver 写自己的日志，出问题时是第一手证据）'
+}
+if ($text -ne $orig) {
 [IO.File]::WriteAllText($path, $text, $enc)
-Log "已写入随包结构配置：$path（count=1、含 1080×2346@60、logging=true；debuglogging 保持 false）"
+Log "配置已写入 $path"
+} else {
+Log '配置无需修改'
+}
 }
 # ================= 六、生效验证 =================
 if ($vdd -and $script:ExitCode -eq 0) {
