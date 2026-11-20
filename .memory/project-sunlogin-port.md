@@ -113,3 +113,8 @@ metadata:
 - 最近使用：读 %APPDATA%\Microsoft\Windows\Recent 的 .lnk 按 mtime 倒序，只留现存 exe 目标，上限 12；对上已安装列表的复用原条目。启动器「全部」无搜索时最近置顶（副文案「最近使用」，下面不重复），搜索时平铺。
 - 运行中判定改 exe 精确匹配优先、名字/标题启发式兜底（UWP 窗口挂 ApplicationFrameHost 只能靠标题）；点已开 App 不再误开新实例，启动等待也先按 exe 认新窗口。
 - 窗口尺寸恢复（机主 22:44 提出）：连入（WM_SESSION_START）先给所有运行中窗口拍 WINDOWPLACEMENT 快照（普通矩形+最大化态，首次为准）；fullscreen_on 动窗前逐个登记 touched。断开自动拆屏与手动「移除手机屏」前先 restore_saved_places：touched 的无条件还原，普查的只还原此刻还停在虚拟屏上的；还原后清表并记日志个数。手动保留屏（不拆）时不还原。
+
+### 2026-11-20 23:0x v2.6.4 已发布（机主批准，六件资产齐全，已下载验包）
+- Release run 44754225493 成功；资产：DMG + .sha256 + .pack + update.json + Snug-Sunlogin-Windows-2.6.4.zip + .zip.sha256。
+- Windows zip 已实际下载校验：sha256 对得上；包内 exe/脚本/README 之外带 nefcon\nefconc.exe 与 vdd\ 四件套——随包驱动正式随版落地。
+- 注意版本线：启动器真源列表/最近使用/窗口尺寸恢复三项在标签之后，只进 2.6.5。
