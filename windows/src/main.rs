@@ -22,8 +22,9 @@ use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontW, GetDC, GetDeviceCaps, ReleaseDC, SetBkMode, SetTextColor, HBRUSH, HDC, HFONT,
-    LOGPIXELSX, TRANSPARENT,
+    CreateFontW, GetDC, GetDeviceCaps, ReleaseDC, SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, FONT_PITCH_AND_FAMILY,
+    HBRUSH, HDC, HFONT, LOGPIXELSX, OUT_DEFAULT_PRECIS, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
@@ -102,7 +103,7 @@ fn run() -> i32 {
         };
         RegisterClassW(&wc);
         // 初始窗口大小按桌面 DPI 缩放，高分屏上别缩成一小团
-        let dpi0 = GetDeviceCaps(GetDC(None), LOGPIXELSX);
+        let dpi0 = GetDeviceCaps(Some(GetDC(None)), LOGPIXELSX);
         let win_w = 700 * dpi0 / 96;
         let win_h = 760 * dpi0 / 96;
         let title_w = display::wide("Snug for Sunlogin — Windows 测试版（Rust）");
@@ -190,8 +191,7 @@ fn mk_control(
 }
 
 /// 建一个 UI 字体：高度按磅数 × DPI 换算（负数表示按字符高度匹配）。
-/// 末尾几个参数用 Win32 常量的原始值：字符集 1=DEFAULT_CHARSET，
-/// 输出/裁剪精度 0=默认，质量 5=CLEARTYPE_QUALITY，pitch/family 0=默认。
+/// 注意 windows 0.59 里 CreateFontW 的 weight 是裸 i32、其余是类型化常量，别混。
 fn make_font(face: &str, points: i32, weight: i32, dpi: i32) -> HFONT {
     let face_w = display::wide(face);
     unsafe {
@@ -204,11 +204,11 @@ fn make_font(face: &str, points: i32, weight: i32, dpi: i32) -> HFONT {
             0,
             0,
             0,
-            1,
-            0,
-            0,
-            5,
-            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            FONT_PITCH_AND_FAMILY(DEFAULT_PITCH.0 | FF_DONTCARE.0),
             PCWSTR(face_w.as_ptr()),
         )
     }
@@ -801,10 +801,10 @@ unsafe extern "system" fn main_wnd_proc(
     match msg {
         WM_CREATE => {
             let base = WS_CHILD | WS_VISIBLE;
-            let hdc = unsafe { GetDC(hwnd) };
-            let dpi = unsafe { GetDeviceCaps(hdc, LOGPIXELSX) };
+            let hdc = unsafe { GetDC(Some(hwnd)) };
+            let dpi = unsafe { GetDeviceCaps(Some(hdc), LOGPIXELSX) };
             unsafe {
-                ReleaseDC(hwnd, hdc);
+                ReleaseDC(Some(hwnd), hdc);
             }
             let ui_font = make_font("Microsoft YaHei UI", 10, 400, dpi);
             let status_font = make_font("Microsoft YaHei UI", 12, 600, dpi);
