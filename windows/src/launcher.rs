@@ -24,9 +24,9 @@ const EN_CHANGE: u32 = 0x0300;
 
 const TOP_H: i32 = 64;
 const CONTENT_TOP: i32 = 76;
-const ROW_H: i32 = 76;
-const TILE_H: i32 = 158;
-const TILE_MIN_W: i32 = 160;
+const ROW_H: i32 = 88;
+const TILE_H: i32 = 188;
+const TILE_MIN_W: i32 = 172;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
