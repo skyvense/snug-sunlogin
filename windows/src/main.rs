@@ -59,7 +59,14 @@ struct MainState {
     btn_test: HWND,
     btn_launcher: HWND,
     btn_install: HWND,
-    hint: HWND,
+    icon_box: HWND,
+    detail: HWND,
+    grp_phone: HWND,
+    grp_test: HWND,
+    grp_driver: HWND,
+    phone_hint: HWND,
+    test_hint: HWND,
+    driver_hint: HWND,
     log_edit: HWND,
     log_text: String,
     displays: Vec<DisplayInfo>,
@@ -93,9 +100,13 @@ fn run() -> i32 {
             Err(_) => HINSTANCE::default(),
         };
         let class_w = display::wide("SnugSunloginMainWindow");
+        // 窗口图标：build.rs 嵌进 exe 的资源 ID 1（Mac 版同款金橙标记）；取不到就用系统默认
+        let app_icon = LoadIconW(Some(hinstance), PCWSTR(1 as *mut u16)).unwrap_or_default();
         let wc = WNDCLASSW {
             lpfnWndProc: Some(main_wnd_proc),
             hInstance: hinstance,
+            hIcon: app_icon,
+            hIconSm: app_icon,
             lpszClassName: PCWSTR(class_w.as_ptr()),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             hbrBackground: HBRUSH(6 as *mut core::ffi::c_void), // COLOR_WINDOW + 1
@@ -224,37 +235,53 @@ fn move_ctrl(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
     }
 }
 
-/// 按当前客户区大小排一遍控件：状态行 → 显示器列表 → 两行按钮 → 日志（吃掉剩余高度）。
+/// 按当前客户区大小排一遍控件，构图学 Mac 版设置页：
+/// 顶部状态区（图标 + 标题 + 说明）→ 显示器列表 → 功能分组（「手机屏」整组在上，
+/// 「测试」「驱动」并排在下，组内带一行短说明）→ 日志吃掉剩余高度。
 /// 坐标先按 96 DPI 的设计值写，再乘窗口 DPI 缩放，高分屏上比例不变。
 fn layout_controls(client_w: i32, client_h: i32) {
     let items = MAIN.with(|c| {
         let cell = c.borrow();
         cell.as_ref().map(|s| {
             (
+                s.icon_box,
                 s.status,
+                s.detail,
                 s.list,
-                s.btn_refresh,
+                s.grp_phone,
                 s.btn_create,
                 s.btn_remove,
+                s.phone_hint,
+                s.grp_test,
                 s.btn_test,
                 s.btn_launcher,
+                s.test_hint,
+                s.grp_driver,
                 s.btn_install,
-                s.hint,
+                s.btn_refresh,
+                s.driver_hint,
                 s.log_edit,
                 s.dpi,
             )
         })
     });
     let Some((
+        icon_box,
         status,
+        detail,
         list,
-        b_refresh,
+        grp_phone,
         b_create,
         b_remove,
+        phone_hint,
+        grp_test,
         b_test,
         b_launcher,
+        test_hint,
+        grp_driver,
         b_install,
-        hint,
+        b_refresh,
+        driver_hint,
         log_edit,
         dpi,
     )) = items
@@ -264,32 +291,55 @@ fn layout_controls(client_w: i32, client_h: i32) {
     let sc = |v: i32| v * dpi / 96;
     let m = sc(16);
     let cw = client_w - m * 2;
-    move_ctrl(status, m, sc(10), cw, sc(26));
-    move_ctrl(list, m, sc(42), cw, sc(138));
-    let y1 = sc(192);
-    let bh = sc(34);
-    let gap = sc(8);
-    let mut x = m;
-    for (b, w) in [
-        (b_refresh, sc(104)),
-        (b_create, sc(150)),
-        (b_remove, sc(130)),
-        (b_test, sc(104)),
-        (b_launcher, sc(104)),
-    ] {
-        move_ctrl(b, x, y1, w, bh);
-        x += w + gap;
-    }
-    let y2 = y1 + bh + sc(8);
-    move_ctrl(b_install, m, y2, sc(150), bh);
+    // 状态区：图标在左，标题与说明两行在右
+    move_ctrl(icon_box, m, sc(12), sc(40), sc(40));
+    move_ctrl(status, m + sc(50), sc(10), cw - sc(50), sc(24));
+    move_ctrl(detail, m + sc(50), sc(36), cw - sc(50), sc(20));
+    // 显示器列表
+    move_ctrl(list, m, sc(64), cw, sc(116));
+    // 「手机屏」组：整宽，创建是大按钮
+    let gy = sc(192);
+    let gh = sc(88);
+    move_ctrl(grp_phone, m, gy, cw, gh);
+    let inner = cw - sc(24);
+    let create_w = inner * 55 / 100;
+    move_ctrl(b_create, m + sc(12), gy + sc(20), create_w, sc(36));
     move_ctrl(
-        hint,
-        m + sc(150) + gap,
-        y2 + sc(6),
-        client_w - (m + sc(150) + gap) - m,
-        sc(22),
+        b_remove,
+        m + sc(12) + create_w + sc(8),
+        gy + sc(20),
+        inner - create_w - sc(8),
+        sc(36),
     );
-    let log_y = y2 + bh + sc(12);
+    move_ctrl(phone_hint, m + sc(12), gy + sc(62), inner, sc(18));
+    // 「测试」「驱动」两组并排
+    let ry = gy + gh + sc(12);
+    let half = (cw - sc(8)) / 2;
+    let inner2 = half - sc(24);
+    let bw = (inner2 - sc(8)) / 2;
+    move_ctrl(grp_test, m, ry, half, gh);
+    move_ctrl(b_test, m + sc(12), ry + sc(20), bw, sc(36));
+    move_ctrl(
+        b_launcher,
+        m + sc(12) + bw + sc(8),
+        ry + sc(20),
+        inner2 - bw - sc(8),
+        sc(36),
+    );
+    move_ctrl(test_hint, m + sc(12), ry + sc(62), inner2, sc(18));
+    let gx = m + half + sc(8);
+    move_ctrl(grp_driver, gx, ry, half, gh);
+    move_ctrl(b_install, gx + sc(12), ry + sc(20), bw, sc(36));
+    move_ctrl(
+        b_refresh,
+        gx + sc(12) + bw + sc(8),
+        ry + sc(20),
+        inner2 - bw - sc(8),
+        sc(36),
+    );
+    move_ctrl(driver_hint, gx + sc(12), ry + sc(62), inner2, sc(18));
+    // 日志吃掉剩余高度
+    let log_y = ry + gh + sc(12);
     move_ctrl(log_edit, m, log_y, cw, client_h - log_y - m);
 }
 
@@ -441,20 +491,20 @@ fn wait_pump(ms: u64) {
 
 // MARK: 业务动作
 
-fn status_info(displays: &[DisplayInfo]) -> (String, StatusLevel) {
+/// 状态文案学 Mac 版：一句标题 + 一句短说明，颜色按级别（就绪绿、待处理橙、一般灰）。
+fn status_info(displays: &[DisplayInfo]) -> (String, String, StatusLevel) {
     if let Some(d) = displays.iter().find(|d| d.is_virtual() && d.is_phone_mode()) {
         return (
-            format!(
-                "手机屏已就绪：{}×{}@{}，向日葵手机端应能选到这块屏",
-                d.width, d.height, d.hz
-            ),
+            "手机屏已就绪".to_string(),
+            format!("{}×{}@{} · 向日葵手机端选这块屏", d.width, d.height, d.hz),
             StatusLevel::Ready,
         );
     }
     if let Some(d) = displays.iter().find(|d| d.is_virtual()) {
         return (
+            "虚拟屏已创建".to_string(),
             format!(
-                "VDD 虚拟屏在（{}×{}@{}），还不是手机屏模式，点「创建手机屏」",
+                "当前 {}×{}@{}，点「创建手机屏」设成手机尺寸",
                 d.width, d.height, d.hz
             ),
             StatusLevel::Warn,
@@ -462,41 +512,46 @@ fn status_info(displays: &[DisplayInfo]) -> (String, StatusLevel) {
     }
     if vdd::settings_exists() {
         return (
-            "VDD 配置文件在，但没枚举到虚拟屏：驱动可能没装好或被禁用".to_string(),
+            "虚拟屏未启动".to_string(),
+            "驱动可能没装好或被禁用，点「安装 VDD」排查".to_string(),
             StatusLevel::Warn,
         );
     }
     (
-        "未检测到 VDD：先点「安装 VDD」，装完再点「创建手机屏」".to_string(),
+        "未检测到虚拟屏驱动".to_string(),
+        "先点「安装 VDD」装驱动，再创建手机屏".to_string(),
         StatusLevel::Neutral,
     )
 }
 
 fn refresh_displays() {
     let displays = display::list();
-    let (st, level) = status_info(&displays);
-    let (list, status) = MAIN.with(|c| {
+    let (headline, detail_text, level) = status_info(&displays);
+    let (list, status, detail) = MAIN.with(|c| {
         let mut cell = c.borrow_mut();
         match cell.as_mut() {
             Some(s) => {
                 s.displays = displays.clone();
                 s.status_level = level;
-                (s.list, s.status)
+                (s.list, s.status, s.detail)
             }
-            None => (HWND::default(), HWND::default()),
+            None => (HWND::default(), HWND::default(), HWND::default()),
         }
     });
     if !list.is_invalid() {
         fill_display_list(list, &displays);
     }
     if !status.is_invalid() {
-        set_text(status, &st);
+        set_text(status, &headline);
+    }
+    if !detail.is_invalid() {
+        set_text(detail, &detail_text);
     }
     ui_log(&format!("显示器枚举：{} 块", displays.len()));
     for d in &displays {
         ui_log(&format!("  {}", d.describe()));
     }
-    ui_log(&format!("状态：{st}"));
+    ui_log(&format!("状态：{headline}（{detail_text}）"));
 }
 
 /// 重启 VDD 设备（找设备 → pnputil 重启）。返回是否找到了设备。
@@ -809,8 +864,47 @@ unsafe extern "system" fn main_wnd_proc(
             let ui_font = make_font("Microsoft YaHei UI", 10, 400, dpi);
             let status_font = make_font("Microsoft YaHei UI", 12, 600, dpi);
             let log_font = make_font("Consolas", 10, 400, dpi);
-            // 控件先随手建在占位尺寸上，建完统一走 layout_controls 摆位
+            // 控件先随手建在占位尺寸上，建完统一走 layout_controls 摆位。
+            // 顺序有讲究：分组框要先于组内的按钮建，边框才不会盖住按钮。
+            let icon_box = mk_control(
+                hwnd,
+                "Static",
+                "",
+                base | WINDOW_STYLE(0x0000_0003), // SS_ICON
+                0,
+                0,
+                10,
+                10,
+                9005,
+                ui_font,
+            );
+            // 状态区左侧放应用图标（Mac 设置页同款构图）：资源 ID 1 按当前 DPI 取 40 点大小
+            let hinst = HINSTANCE(
+                unsafe { GetModuleHandleW(None) }
+                    .map(|m| m.0)
+                    .unwrap_or_default(),
+            );
+            if let Ok(icon) = unsafe {
+                LoadImageW(
+                    Some(hinst),
+                    PCWSTR(1 as *mut u16),
+                    IMAGE_ICON,
+                    40 * dpi / 96,
+                    40 * dpi / 96,
+                    LR_DEFAULTCOLOR,
+                )
+            } {
+                unsafe {
+                    SendMessageW(
+                        icon_box,
+                        STM_SETICON,
+                        Some(WPARAM(icon.0 as usize)),
+                        Some(LPARAM(0)),
+                    );
+                }
+            }
             let status = mk_control(hwnd, "Static", "", base, 0, 0, 10, 10, 9001, status_font);
+            let detail = mk_control(hwnd, "Static", "", base, 0, 0, 10, 10, 9006, ui_font);
             let list = mk_control(
                 hwnd,
                 "SysListView32",
@@ -824,28 +918,88 @@ unsafe extern "system" fn main_wnd_proc(
                 ui_font,
             );
             init_list_columns(list, dpi);
-            let btn_refresh =
-                mk_control(hwnd, "Button", "刷新显示器", base, 0, 0, 10, 10, ID_REFRESH, ui_font);
+            let grp_phone = mk_control(
+                hwnd,
+                "Button",
+                "手机屏",
+                base | WINDOW_STYLE(0x0000_0007), // BS_GROUPBOX
+                0,
+                0,
+                10,
+                10,
+                9010,
+                ui_font,
+            );
             let btn_create =
                 mk_control(hwnd, "Button", "创建手机屏", base, 0, 0, 10, 10, ID_CREATE, ui_font);
             let btn_remove =
                 mk_control(hwnd, "Button", "移除手机屏", base, 0, 0, 10, 10, ID_REMOVE, ui_font);
-            let btn_test =
-                mk_control(hwnd, "Button", "测试窗口", base, 0, 0, 10, 10, ID_TEST, ui_font);
-            let btn_launcher =
-                mk_control(hwnd, "Button", "启动器", base, 0, 0, 10, 10, ID_LAUNCHER, ui_font);
-            let btn_install =
-                mk_control(hwnd, "Button", "安装 VDD", base, 0, 0, 10, 10, ID_INSTALL, ui_font);
-            let hint = mk_control(
+            let phone_hint = mk_control(
                 hwnd,
                 "Static",
-                "装驱动只需一次；创建/移除手机屏会自动改配置并重启驱动设备",
+                "向日葵中增加一块竖屏 · 1080×2346，创建/移除会自动改配置并重启驱动",
                 base,
                 0,
                 0,
                 10,
                 10,
-                9004,
+                9011,
+                ui_font,
+            );
+            let grp_test = mk_control(
+                hwnd,
+                "Button",
+                "测试",
+                base | WINDOW_STYLE(0x0000_0007), // BS_GROUPBOX
+                0,
+                0,
+                10,
+                10,
+                9012,
+                ui_font,
+            );
+            let btn_test =
+                mk_control(hwnd, "Button", "测试窗口", base, 0, 0, 10, 10, ID_TEST, ui_font);
+            let btn_launcher =
+                mk_control(hwnd, "Button", "启动器", base, 0, 0, 10, 10, ID_LAUNCHER, ui_font);
+            let test_hint = mk_control(
+                hwnd,
+                "Static",
+                "在虚拟屏上看串流、开 App 资源库",
+                base,
+                0,
+                0,
+                10,
+                10,
+                9013,
+                ui_font,
+            );
+            let grp_driver = mk_control(
+                hwnd,
+                "Button",
+                "驱动",
+                base | WINDOW_STYLE(0x0000_0007), // BS_GROUPBOX
+                0,
+                0,
+                10,
+                10,
+                9014,
+                ui_font,
+            );
+            let btn_install =
+                mk_control(hwnd, "Button", "安装 VDD", base, 0, 0, 10, 10, ID_INSTALL, ui_font);
+            let btn_refresh =
+                mk_control(hwnd, "Button", "刷新显示器", base, 0, 0, 10, 10, ID_REFRESH, ui_font);
+            let driver_hint = mk_control(
+                hwnd,
+                "Static",
+                "驱动只需装一次；没屏时先点「安装 VDD」",
+                base,
+                0,
+                0,
+                10,
+                10,
+                9015,
                 ui_font,
             );
             let log_edit = mk_control(
@@ -871,7 +1025,14 @@ unsafe extern "system" fn main_wnd_proc(
                     btn_test,
                     btn_launcher,
                     btn_install,
-                    hint,
+                    icon_box,
+                    detail,
+                    grp_phone,
+                    grp_test,
+                    grp_driver,
+                    phone_hint,
+                    test_hint,
+                    driver_hint,
                     log_edit,
                     log_text: String::new(),
                     displays: Vec::new(),
@@ -908,25 +1069,29 @@ unsafe extern "system" fn main_wnd_proc(
             LRESULT(0)
         }
         WM_CTLCOLORSTATIC => {
-            // 只给状态行上色：就绪绿、待处理橙；其余静态文字走默认
+            // 状态标题按级别上色（就绪绿、待处理橙），说明行固定灰色；其余静态文字走默认。
+            // kind：Some(Some(级别)) 是标题、Some(None) 是说明行、None 与我无关。
             let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
             let ctrl = HWND(lparam.0 as *mut core::ffi::c_void);
-            let level = MAIN.with(|c| {
+            let kind = MAIN.with(|c| {
                 let cell = c.borrow();
                 cell.as_ref().and_then(|s| {
                     if s.status == ctrl {
-                        Some(s.status_level)
+                        Some(Some(s.status_level))
+                    } else if s.detail == ctrl {
+                        Some(None)
                     } else {
                         None
                     }
                 })
             });
-            match level {
+            match kind {
                 Some(level) => {
                     let color = match level {
-                        StatusLevel::Ready => COLORREF(0x003D7A1F),
-                        StatusLevel::Warn => COLORREF(0x00006A9C),
-                        StatusLevel::Neutral => COLORREF(0x00000000),
+                        Some(StatusLevel::Ready) => COLORREF(0x003D7A1F),
+                        Some(StatusLevel::Warn) => COLORREF(0x00006A9C),
+                        Some(StatusLevel::Neutral) => COLORREF(0x00000000),
+                        None => COLORREF(0x00606060),
                     };
                     unsafe {
                         SetTextColor(hdc, color);
