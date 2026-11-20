@@ -431,6 +431,30 @@ Log "下载失败：$($_.Exception.Message)"
 }
 }
 if ($infPath) {
+# 证书先行：驱动包是自签名（CN=Virtual Display Driver），证书链不受系统信任时
+# pnputil 会报「在不受信任提供程序信任的根证书中终止」直接拒绝（2026-11-20
+# 同事机器实测）。官方包靠 installCert.bat 把证书导入 Root + TrustedPublisher；
+# 这里从驱动包自己的 .cat 里提取签名证书导入，效果相同且不依赖包里附带 .cer。
+$infDir = Split-Path $infPath -Parent
+$cat = Get-ChildItem $infDir -Filter '*.cat' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($cat) {
+try {
+$sig = Get-AuthenticodeSignature $cat.FullName
+if ($sig.SignerCertificate) {
+$cer = Join-Path $env:TEMP 'Virtual_Display_Driver.cer'
+[IO.File]::WriteAllBytes($cer, $sig.SignerCertificate.Export('Cert'))
+Log "导入驱动签名证书（$($sig.SignerCertificate.Subject)）到 Root + TrustedPublisher…"
+certutil.exe -addstore -f Root $cer 2>&1 | ForEach-Object { Log " certutil(Root): $_" }
+certutil.exe -addstore -f TrustedPublisher $cer 2>&1 | ForEach-Object { Log " certutil(TP): $_" }
+} else {
+Log '警告：从 .cat 里没提取到签名证书，pnputil 可能因证书不受信任而失败'
+}
+} catch {
+Log "证书导入失败：$($_.Exception.Message)（pnputil 可能因此装不上驱动）"
+}
+} else {
+Log '警告：INF 同目录没有 .cat 文件，跳过证书导入'
+}
 Log '执行 pnputil /add-driver 把驱动包装入仓库…'
 pnputil.exe /add-driver $infPath /install 2>&1 | ForEach-Object { Log " pnputil: $_"}
 } else {
