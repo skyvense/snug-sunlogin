@@ -73,3 +73,7 @@ metadata:
 - 同事证据链经逐条核对全部属实：① 驱动自签名证书（CN=Virtual Display Driver）不在受信任存储时 pnputil /add-driver 直接拒绝，而 setup-virtual-display.ps1 原先没有任何证书导入逻辑（官方包靠 installCert.bat 做这步）；② 应用 find_vdd 按友好名 "virtual display" 模糊匹配 + is_virtual 按适配器名 contains 匹配，在装了 GameViewer/AskLink 等别家虚拟适配器的机器上会先命中别人的设备去启用/重启/禁用；③ 同机双开两个实例。
 - 修复：脚本在 pnputil 前从驱动包 .cat 提取签名证书（Get-AuthenticodeSignature）导入 LocalMachine Root + TrustedPublisher，不依赖包附带 .cer；find_vdd 改为只认实例 ID 带 MTTVDD 或硬件 ID 精确等于 Root\MttVDD/MttVDD（枚举附带 DEVPKEY_Device_HardwareIds），is_virtual 只认适配器名以 "Virtual Display Driver" 开头或带 MttVDD（INF 的 DeviceDesc 实测就是该字符串）；main 加 CreateMutexW 单实例互斥（windows 0.59 里该函数不在 Threading 路径，直接声明 kernel32 导入；第二个实例写日志退出）。pnputil 退出码 50 未做硬中止：本就启用时也可能非 0，成败仍以枚举验证为准。
 - 教训：同一消息里并行发多个 edit + 依赖它们的 commit exec，exec 可能在 edit 落盘前执行——出现过「提交只落了导入行、函数体留在工作区」的半成品提交，后以补提交修复。依赖顺序的工具调用不要同批并行。
+
+### 2026-11-20 19:1x Mac 应用中心打开 App 一直转圈（已修，待真机验证）
+- 机主报：应用中心打开 App 后一直转圈，像找不到窗口，乱点一阵又移过来了。代码取证：PhoneDesk.awaitWindow 只轮询 shownWindows，而 shownWindows = AX 标准窗口 ∩ CGWindowList 在屏清单（.optionOnScreenOnly）——窗口最小化或开在别的桌面空间时永远不在清单里，只能等满超时（冷启动 30 秒/唤回 10 秒）；用户乱点把窗口弄回当前屏/取消最小化才被下一轮轮询捞到，与体感完全吻合。place() 本来就处理最小化还原与跨屏挪位，卡的只是发现环节。
+- 修复：awaitWindow 等过 2 秒宽限期（hiddenGrace）后改查新增的 standardWindows（App 全部标准窗口，没最小化的优先），捞到没见过的直接走 place，并写日志「捞到不在屏上的 X」。协议/实现/假件/回归测试齐备，main CI 全绿（44724979482，342 项）。此修复在 v2.6.2 标签之后提交，未进 2.6.2。
