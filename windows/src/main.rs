@@ -12,6 +12,7 @@
 mod apps;
 mod devices;
 mod display;
+mod guide;
 mod launcher;
 mod log;
 mod phones;
@@ -52,6 +53,14 @@ const ID_MODEL: i32 = 1007;
 const ID_MODE_AUTO: i32 = 1008;
 const ID_MODE_MANUAL: i32 = 1009;
 const ID_UPDATE: i32 = 1010;
+const ID_GUIDE: i32 = 1011;
+
+/// 启动时发现没装驱动 → 问用户要不要开配置向导
+const WM_GUIDE_PROMPT: u32 = WM_APP + 30;
+
+/// 带 --guide（或误写的 --guild）启动：直接打开配置向导，不等询问
+static GUIDE_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 // 组合框/按钮消息（用字面量，含义见 Win32 文档）
 const CB_ADDSTRING: u32 = 0x0143;
@@ -77,6 +86,7 @@ struct MainState {
     btn_launcher: HWND,
     btn_install: HWND,
     btn_update: HWND,
+    btn_guide: HWND,
     icon_box: HWND,
     detail: HWND,
     grp_phone: HWND,
@@ -118,6 +128,9 @@ unsafe extern "system" {
 
 fn main() {
     log::init();
+    if std::env::args().any(|a| a == "--guide" || a == "--guild") {
+        GUIDE_REQUESTED.store(true, Ordering::Relaxed);
+    }
     // GUI 子系统下 panic 默认无处可见，统一落到日志文件，方便事后排障
     std::panic::set_hook(Box::new(|info| {
         log::write(&format!("PANIC：{info}"));
@@ -221,7 +234,7 @@ fn set_text(hwnd: HWND, s: &str) {
     }
 }
 
-fn mk_control(
+pub(crate) fn mk_control(
     parent: HWND,
     class: &str,
     text: &str,
@@ -331,6 +344,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.btn_install,
                 s.btn_refresh,
                 s.btn_update,
+                s.btn_guide,
                 s.driver_hint,
                 s.log_edit,
                 s.dpi,
@@ -358,6 +372,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
         b_install,
         b_refresh,
         b_update,
+        b_guide,
         driver_hint,
         log_edit,
         dpi,
@@ -433,7 +448,14 @@ fn layout_controls(client_w: i32, client_h: i32) {
         inner2 - bw - sc(8),
         sc(36),
     );
-    move_ctrl(b_update, gx + sc(12), ry + sc(62), inner2, sc(32));
+    move_ctrl(b_update, gx + sc(12), ry + sc(62), bw, sc(32));
+    move_ctrl(
+        b_guide,
+        gx + sc(12) + bw + sc(8),
+        ry + sc(62),
+        inner2 - bw - sc(8),
+        sc(32),
+    );
     move_ctrl(driver_hint, gx + sc(12), ry + sc(102), inner2, sc(18));
     // 日志吃掉剩余高度
     let log_y = ry + gh + sc(12);
@@ -778,7 +800,7 @@ fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
     }
 }
 
-fn create_phone_screen() {
+pub(crate) fn create_phone_screen() {
     ui_log("—— 创建手机屏 ——");
     let (pw, ph, phz) = phones::current_spec();
     let mut state = vdd::load_state();
@@ -1174,6 +1196,26 @@ fn toggle_launcher() {
     }
 }
 
+/// 启动后查一次驱动在不在：不在就回主窗口问用户要不要开配置向导。
+/// 只在启动时问这一次，不反复打扰。
+fn spawn_driver_prompt(hwnd_raw: usize) {
+    std::thread::spawn(move || {
+        let missing = devices::display_adapters()
+            .map(|list| devices::find_vdd(&list).is_none())
+            .unwrap_or(false);
+        if missing {
+            unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(hwnd_raw as *mut _)),
+                    WM_GUIDE_PROMPT,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }
+    });
+}
+
 fn install_vdd() {
     let exe = std::env::current_exe().unwrap_or_default();
     let script = exe.with_file_name("setup-virtual-display.ps1");
@@ -1426,10 +1468,12 @@ unsafe extern "system" fn main_wnd_proc(
                 mk_control(hwnd, "Button", "刷新显示器", base, 0, 0, 10, 10, ID_REFRESH, ui_font);
             let btn_update =
                 mk_control(hwnd, "Button", "检查更新", base, 0, 0, 10, 10, ID_UPDATE, ui_font);
+            let btn_guide =
+                mk_control(hwnd, "Button", "配置向导", base, 0, 0, 10, 10, ID_GUIDE, ui_font);
             let driver_hint = mk_control(
                 hwnd,
                 "Static",
-                "驱动只需装一次；没屏时先点「安装 VDD」",
+                "没屏先点「配置向导」一步步装；驱动只装一次",
                 base,
                 0,
                 0,
@@ -1462,6 +1506,7 @@ unsafe extern "system" fn main_wnd_proc(
                     btn_launcher,
                     btn_install,
                     btn_update,
+                    btn_guide,
                     icon_box,
                     detail,
                     grp_phone,
@@ -1506,6 +1551,12 @@ unsafe extern "system" fn main_wnd_proc(
             session::spawn(hwnd.0 as usize);
             // 启动后静默查一次新版：没有就不打扰，有才弹窗问
             update::spawn_check(hwnd.0 as usize, false);
+            // 配置向导：带 --guide 启动直接打开；否则发现没装驱动时问一句要不要开
+            if GUIDE_REQUESTED.load(Ordering::Relaxed) {
+                guide::open(hwnd);
+            } else {
+                spawn_driver_prompt(hwnd.0 as usize);
+            }
             LRESULT(0)
         }
         WM_SIZE => {
@@ -1635,6 +1686,24 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
+        WM_GUIDE_PROMPT => {
+            let text_w = display::wide(
+                "还没检测到虚拟显示驱动（MttVDD），虚拟屏暂时用不了。\n\n打开配置向导，一步步把它装好吗？",
+            );
+            let cap_w = display::wide("SnugWindows");
+            let yes = unsafe {
+                MessageBoxW(
+                    Some(hwnd),
+                    PCWSTR(text_w.as_ptr()),
+                    PCWSTR(cap_w.as_ptr()),
+                    MB_YESNO | MB_ICONQUESTION,
+                )
+            };
+            if yes == IDYES {
+                guide::open(hwnd);
+            }
+            LRESULT(0)
+        }
         update::WM_UPDATE_AVAILABLE => {
             if let Some(latest) = update::take_pending() {
                 let text = format!(
@@ -1701,6 +1770,7 @@ unsafe extern "system" fn main_wnd_proc(
                     ui_log("正在检查更新…");
                     update::spawn_check(hwnd.0 as usize, true);
                 }
+                ID_GUIDE => guide::open(hwnd),
                 ID_MODEL if notify == 1 => on_model_changed(), // 1 = CBN_SELCHANGE
                 ID_MODE_AUTO => apply_auto_setting(true),
                 ID_MODE_MANUAL => apply_auto_setting(false),
