@@ -6,7 +6,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 pub const WM_SESSION_START: u32 = WM_APP + 10;
@@ -57,8 +57,8 @@ fn post(hwnd_raw: usize, msg: u32) {
         let _ = PostMessageW(
             Some(HWND(hwnd_raw as *mut core::ffi::c_void)),
             msg,
-            None,
-            None,
+            WPARAM(0),
+            LPARAM(0),
         );
     }
 }
