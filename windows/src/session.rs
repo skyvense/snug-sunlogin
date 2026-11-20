@@ -18,7 +18,10 @@ pub static AGENT_PRESENT: AtomicBool = AtomicBool::new(false);
 fn agent_running() -> bool {
     // 全量查进程命令行找标记：先按进程名粗筛会漏掉改名后的新版客户端，全量最稳。
     // 每 3 秒一次、只在后台线程跑，开销可接受；真嫌重再换原生进程枚举。
-    let script = "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--mod=desktopagent*' } | Select-Object -First 1 -ExpandProperty ProcessId";
+    // 必须排除查询进程自己（$PID）：脚本是经 -Command 传给 powershell.exe 的，
+    // 标记字符串就写在它自己的命令行里，不排除的话每次都会「查到」自己，
+    // 会话被永远判为连着、断开永远触发不了（2026-11-20 真机实测踩中）。
+    let script = "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*--mod=desktopagent*' } | Select-Object -First 1 -ExpandProperty ProcessId";
     let (exit, output) = crate::devices::run(
         "powershell.exe",
         &["-NoProfile", "-Command", script],
@@ -37,6 +40,7 @@ pub fn spawn(hwnd_raw: usize) {
                 misses = 0;
                 if !present {
                     present = true;
+                    crate::log::write("会话监视：desktopagent 出现，通知主窗口（连入）");
                     post(hwnd_raw, WM_SESSION_START);
                 }
             } else if present {
@@ -44,6 +48,7 @@ pub fn spawn(hwnd_raw: usize) {
                 if misses >= 2 {
                     present = false;
                     misses = 0;
+                    crate::log::write("会话监视：desktopagent 连续两次查不到，通知主窗口（断开）");
                     post(hwnd_raw, WM_SESSION_END);
                 }
             }
