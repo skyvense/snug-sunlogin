@@ -25,11 +25,8 @@ use display::DisplayInfo;
 use std::cell::RefCell;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use windows::core::{w, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{
-    COLORREF, ERROR_ALREADY_EXISTS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM,
-};
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CreateFontW, GetDC, GetDeviceCaps, ReleaseDC, SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
     CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, HBRUSH, HDC, HFONT,
