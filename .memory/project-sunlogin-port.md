@@ -107,3 +107,9 @@ metadata:
 
 ### 待办（机主 2026-11-20 22:28 提出，后面再调）
 - Windows 版被 iPhone 控制时，虚拟屏画面四角被手机圆角屏裁掉：左上角的悬浮启动器（App）按钮、启动器右上角的关闭按钮都会被圆角遮住一部分。后续把这两个角上的控件往内收（加安全边距）再调。
+
+### 2026-11-20 22:4x 启动器数据层换真源 + 窗口尺寸恢复（已实现，CI 绿，在 v2.6.4 标签之后）
+- 「全部」列表感觉不对的根源：旧实现只扫开始菜单 .lnk。现改为 .lnk（IShellLink 解析出目标 exe）∪ shell AppsFolder 枚举（开始菜单「所有应用」真身：桌面项解析名=exe 路径，打包/UWP 项=带 ! 的 AUMID，走 IApplicationActivationManager 激活、图标按 AppsFolder PIDL 取）；Cargo 需 Win32_System_Com + Win32_UI_Shell_Common 两个特性（后者门控 Common 类型与 IShellFolder 方法，查 crate 源码 cfg 确认）。
+- 最近使用：读 %APPDATA%\Microsoft\Windows\Recent 的 .lnk 按 mtime 倒序，只留现存 exe 目标，上限 12；对上已安装列表的复用原条目。启动器「全部」无搜索时最近置顶（副文案「最近使用」，下面不重复），搜索时平铺。
+- 运行中判定改 exe 精确匹配优先、名字/标题启发式兜底（UWP 窗口挂 ApplicationFrameHost 只能靠标题）；点已开 App 不再误开新实例，启动等待也先按 exe 认新窗口。
+- 窗口尺寸恢复（机主 22:44 提出）：连入（WM_SESSION_START）先给所有运行中窗口拍 WINDOWPLACEMENT 快照（普通矩形+最大化态，首次为准）；fullscreen_on 动窗前逐个登记 touched。断开自动拆屏与手动「移除手机屏」前先 restore_saved_places：touched 的无条件还原，普查的只还原此刻还停在虚拟屏上的；还原后清表并记日志个数。手动保留屏（不拆）时不还原。
