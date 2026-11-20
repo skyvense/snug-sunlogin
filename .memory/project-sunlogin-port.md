@@ -82,3 +82,8 @@ metadata:
 - 此前 Windows exe 无任何版本标识、无更新机制。已实现：仓库根 VERSION 为单一来源，build.rs 读入后以 SNUG_VERSION 编进程序并用 winresource 写 exe FileVersion/ProductVersion 字符串；主窗口标题改为「Snug for Sunlogin — Windows 版 vX.Y.Z」，启动写文件日志。
 - 新增 windows/src/update.rs：启动静默查一次 GitHub 最新 Release（PowerShell Invoke-RestMethod 解析，只回一行「版本|zip|sha」），驱动组加「检查更新」按钮可手动查；有新版 MessageBox 确认后下载 zip、按官方 .sha256 用 Get-FileHash 验包、Expand-Archive 解压到 %TEMP%\SnugWindowsUpdate，写 swap.ps1（等旧进程退出→覆盖 SnugWindows.exe 与 setup-virtual-display.ps1→重新拉起），主进程拉起脚本（DETACHED_PROCESS，子进程继承管理员权限）后自发 WM_CLOSE 退出。版本号按数字段比较。CI 绿（44730288988）。
 - 注意自举问题：此功能在 v2.6.3 标签之后提交，2.6.3 不含它；且现装的旧版没有更新器，用户需再手动下载一次含更新器的版本，之后才能自动更新。
+
+### 2026-11-20 20:0x Windows 配置向导（已实现，CI 绿，待发版）
+- 新增 windows/src/guide.rs 独立窗口，三步带通：第 1 步检查（精确认 MttVDD 设备 + 当前虚拟屏/手机尺寸状态）→ 第 2 步安装（在本窗口内跑 setup-virtual-display.ps1 -NoPause，stdout 实时滚进正文，结束自动复查；失败给日志路径 + 重新安装）→ 第 3 步验证（调主程序 create_phone_screen 后轮询 20 秒，确认虚拟屏出现且 is_phone_mode，通过显示分辨率收官）。复用主窗口 mk_control（改 pub(crate)）与 create_phone_screen（改 pub(crate)）。
+- 三个入口：① 命令行 --guide（也认误写的 --guild）；② 正常启动时后台查一次驱动，缺失才 MessageBox 问要不要开向导（每次启动最多问一次）；③ 主窗口驱动组「配置向导」按钮（与「检查更新」并排，原整行改为两半）。驱动组提示文案改为「没屏先点『配置向导』一步步装；驱动只装一次」。
+- 编译教训（windows 0.59）：SendMessageW 的 wparam/lparam 是 Option 形式；EnableWindow 不在 WindowsAndMessaging 常用路径，按钮禁用改走 GetWindowLongW/SetWindowLongW 改 WS_DISABLED 位（guide.rs set_enabled）。
