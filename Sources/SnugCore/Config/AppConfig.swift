@@ -5,7 +5,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     /// 总开关：用手机远程时加一块手机屏
     public var phoneScreen = true
     /// 手机屏上把 向日葵 发来的单指操作翻译成 iPhone 的手势
-    public var gestures = true
+    /// （在向日葵下有异常：暂时强制关闭——默认关、解码时不读存量值、设置页也开启不了；修好再恢复）
+    public var gestures = false
     /// 手机屏底部小横条左边放相机键：截当前窗口到剪贴板。要另授「录屏与系统录音」权限，默认关
     public var screenshot = false
     /// 窗口放上手机屏时，字号默认放大几级（每个 App 改过之后按它自己记住的级数）
@@ -32,7 +33,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = AppConfig()
         phoneScreen = try c.decodeIfPresent(Bool.self, forKey: .phoneScreen) ?? d.phoneScreen
-        gestures = try c.decodeIfPresent(Bool.self, forKey: .gestures) ?? d.gestures
+        gestures = false // 强制关闭（见属性注释）：存量配置里开着的也不再生效
         screenshot = try c.decodeIfPresent(Bool.self, forKey: .screenshot) ?? d.screenshot
         zoomSteps = try c.decodeIfPresent(Int.self, forKey: .zoomSteps).map { $0.clamped(to: Self.zoomStepsRange) } ?? d.zoomSteps
         // 手改坏了的（缺字段、不是竖握、不是正数）用默认值，不连累别的设置

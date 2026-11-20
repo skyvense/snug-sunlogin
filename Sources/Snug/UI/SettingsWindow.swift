@@ -30,9 +30,9 @@ struct SettingsView: View {
                 }
                 .disabled(!state.config.phoneScreen)
                 Toggle(isOn: binding(\.config.gestures, intents.setGestures)) {
-                    SettingLabel("触控手势", detail: "单指滚动 · 长按选择 · 长按松开右键", symbol: "hand.draw.fill", tint: .orange)
+                    SettingLabel("触控手势", detail: "向日葵下暂不可用", symbol: "hand.draw.fill", tint: .orange)
                 }
-                .disabled(!state.config.phoneScreen)
+                .disabled(true) // 手势在向日葵下有异常，修好前不让开启（配置层也强制关闭）
                 Toggle(isOn: binding(\.config.screenshot, intents.setScreenshot)) {
                     SettingLabel("截图", detail: "指示条左侧的相机键 · 截当前窗口到剪贴板", symbol: "camera.viewfinder", tint: .pink)
                 }
