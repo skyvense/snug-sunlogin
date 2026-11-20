@@ -42,3 +42,7 @@ metadata:
 - 机主纠正感知路线：不用 history.log，盯进程最靠谱——Windows 上桌面主控连入时向日葵拉起带 `--mod=desktopagent` 的桌面代理进程，它在不在即会话在不在（传文件/摄像头走别的 mod，不误触发；此点待 U6 实测确认）。
 - 实现（feat/windows-app，提交 7bbf14f + 3472b0f + PostMessageW 修复）：phones.rs（机型库 include_str! 仓库根 Assets/phone-models.json——单一数据源；scaled_resolution 短边上限 1080、偶数高，17 Pro Max 恰为 1080×2346；current_spec 全局）+ vdd/display/创建流程改读 current_spec，删 PHONE_* 常量；settings.rs（%LOCALAPPDATA%\SnugWindows\settings.txt：phone_model/auto_create）；session.rs（后台线程 3 秒轮询 Get-CimInstance 查命令行标记，消失连续 2 次才发 END，PostMessageW 边沿通知 UI 线程）；主窗口：手机屏组加高到 148（型号下拉 CBS_DROPDOWNLIST + 「主控连入时自动建屏」BS_AUTOCHECKBOX 默认开），换型号时屏在用先按旧规格拆净再重建；自动只拆自己建的屏（screen_auto_owned），手动建/拆优先；状态行加「等待主控连入」（自动开且无主控且无屏时）。CI 44700377692 绿，产物字节验：desktopagent、机型名、settings.txt、中文 UI 串都在 exe 里（742,912 B）。
 - 待机主实测（SPIKE 新增 U6）：自动建/拆、传文件不触发、手动优先、换型号尺寸跟随；与先前待复测的移除修复（20737a4）同批验。
+
+### 2026-11-20 16:2x 悬浮 App 键改图标异形窗（机主在手机上实测时提的要求）
+- 旧悬浮键是 76×76 白色圆角方块 + 珊瑚描边 + 「App」文字。机主要求：大一点、做成图标样式的异形窗、点击要有效果。
+- 实现（launcher.rs）：边长 104；SetWindowRgn 把窗口轮廓设成图标双屏叠片（含右下阴影偏移）的并集，轮廓外不绘制也不接点击；绘制改为 GDI 手绘——底铺深金阴影色、两块屏各自竖向金橙渐变（后屏 #FFE066→#FFC21A、前屏 #FFB03A→#FF8A00）+ 深色描边分层，去掉文字；按压效果：LBUTTONDOWN 缩到 92% 且亮度 80%（SetCapture 跟踪），LBUTTONUP 且落点在轮廓内（PtInRegion）才打开资源库，滑出松手取消，WM_CAPTURECHANGED 兜底清按压态；右键收起不变。CI 44701653042 绿。待机主真机看效果（形状边缘锯齿、渐变观感、按压手感）。
