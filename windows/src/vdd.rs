@@ -16,6 +16,8 @@ pub struct VddState {
     pub added_resolution: bool,
     /// 配置文件是本应用新建的（原本不存在）——移除时整文件删除即回滚。
     pub created_file: bool,
+    /// 建屏时改动虚拟屏缩放前的相对步数（scale.rs）——移除时还原；没改过为 None。
+    pub scale_rel_before: Option<i32>,
 }
 
 // MARK: 状态文件（%LOCALAPPDATA%\SnugWindows\vdd-state.txt，简单的 k=v 行）
@@ -33,6 +35,7 @@ pub fn load_state() -> VddState {
                     "original_count" => state.original_count = v.trim().parse().ok(),
                     "added_resolution" => state.added_resolution = v.trim() == "1",
                     "created_file" => state.created_file = v.trim() == "1",
+                    "scale_rel_before" => state.scale_rel_before = v.trim().parse().ok(),
                     _ => {}
                 }
             }
@@ -48,6 +51,9 @@ pub fn save_state(state: &VddState) {
     }
     text += &format!("added_resolution={}\n", if state.added_resolution { 1 } else { 0 });
     text += &format!("created_file={}\n", if state.created_file { 1 } else { 0 });
+    if let Some(rel) = state.scale_rel_before {
+        text += &format!("scale_rel_before={rel}\n");
+    }
     let _ = std::fs::create_dir_all(crate::log::dir());
     let _ = std::fs::write(state_path(), text);
 }

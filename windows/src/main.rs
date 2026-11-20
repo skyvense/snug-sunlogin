@@ -15,6 +15,7 @@ mod display;
 mod launcher;
 mod log;
 mod phones;
+mod scale;
 mod session;
 mod settings;
 mod testwin;
@@ -813,6 +814,7 @@ fn create_phone_screen() {
     match virtual_now {
         Some(d) if d.is_phone_mode() => {
             ui_log(&format!("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试"));
+            apply_phone_scale();
         }
         Some(d) => {
             ui_log(&format!(
@@ -833,6 +835,7 @@ fn create_phone_screen() {
             });
             if ok {
                 ui_log(&format!("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试"));
+                apply_phone_scale();
             } else {
                 ui_log(&format!("设模式后仍不是 {pw}×{ph}，看上面枚举结果确认虚拟屏实际模式，并把日志贴回主会话"));
             }
@@ -843,9 +846,50 @@ fn create_phone_screen() {
     }
 }
 
+/// 手机屏就绪后把它的显示缩放抬到至少 250%（手机上界面更大、更好点）；
+/// 只升不降；第一次改动前把原始相对步数记进状态文件，移除手机屏时还原。
+fn apply_phone_scale() {
+    let Some(v) = display::list().into_iter().find(|d| d.is_virtual()) else {
+        return;
+    };
+    let info = match scale::query(&v.device_name) {
+        Ok(i) => i,
+        Err(e) => {
+            ui_log(&format!("虚拟屏缩放：{e}"));
+            return;
+        }
+    };
+    if info.percent >= scale::PHONE_MIN_PERCENT {
+        ui_log(&format!("虚拟屏缩放已是 {}%，够大，不动", info.percent));
+        return;
+    }
+    let mut state = vdd::load_state();
+    if state.scale_rel_before.is_none() {
+        state.scale_rel_before = Some(info.rel);
+        vdd::save_state(&state);
+    }
+    match scale::set_percent(&v.device_name, scale::PHONE_MIN_PERCENT) {
+        Ok(actual) => ui_log(&format!(
+            "虚拟屏缩放 {}% → {actual}%（手机上界面更大、更好点）",
+            info.percent
+        )),
+        Err(e) => ui_log(&format!("虚拟屏缩放没调成：{e}")),
+    }
+}
+
 fn remove_phone_screen() {
     ui_log("—— 移除手机屏（恢复配置） ——");
     let state = vdd::load_state();
+    // 缩放还原要趁虚拟屏还在时做：后面设备一禁用就够不着这块屏了
+    if let Some(rel) = state.scale_rel_before {
+        match display::list().into_iter().find(|d| d.is_virtual()) {
+            Some(v) => match scale::set_rel(&v.device_name, rel) {
+                Ok(()) => ui_log("虚拟屏缩放已还原到建屏前"),
+                Err(e) => ui_log(&format!("虚拟屏缩放还原失败：{e}")),
+            },
+            None => ui_log("虚拟屏当前不在，缩放没法还原（它下次出现时可能仍是放大值）"),
+        }
+    }
     if state.created_file && vdd::settings_exists() {
         // 配置文件是本应用新建的：整个删掉就是最干净的回滚
         match std::fs::remove_file(vdd::SETTINGS_PATH) {
