@@ -1569,14 +1569,14 @@ unsafe extern "system" fn main_wnd_proc(
         }
         session::WM_SESSION_END => {
             ui_log("向日葵主控已断开（desktopagent 进程已退出）");
-            let (auto, owned, has_virtual) = MAIN.with(|c| {
-                c.borrow().as_ref().map(|s| {
-                    (
-                        s.auto_create,
-                        s.screen_auto_owned,
-                        s.displays.iter().any(|d| d.is_virtual()),
-                    )
-                }).unwrap_or((false, false, false))
+            // 虚拟屏在不在用新鲜枚举判：状态里的那份是上次刷新留下的缓存，
+            // 拿它决定拆不拆，缓存一旧就会拆漏
+            let has_virtual = display::list().iter().any(|d| d.is_virtual());
+            let (auto, owned) = MAIN.with(|c| {
+                c.borrow()
+                    .as_ref()
+                    .map(|s| (s.auto_create, s.screen_auto_owned))
+                    .unwrap_or((false, false))
             });
             // 只拆自动建的：手动建的屏留给用户自己决定
             if auto && owned && has_virtual {
@@ -1585,6 +1585,14 @@ unsafe extern "system" fn main_wnd_proc(
                 remove_phone_screen();
                 set_screen_owner(false);
             } else {
+                // 不拆也要把三个条件的值打出来，下次一看日志就知道卡在哪个条件
+                let yn = |b: bool| if b { "是" } else { "否" };
+                ui_log(&format!(
+                    "主控已断开，但不自动拆屏（自动模式={}，本屏为自动建={}，虚拟屏在={}）",
+                    yn(auto),
+                    yn(owned),
+                    yn(has_virtual)
+                ));
                 refresh_displays();
             }
             LRESULT(0)
