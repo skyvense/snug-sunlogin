@@ -118,3 +118,55 @@ jobs:
           if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
             security delete-keychain "$KEYCHAIN_PATH"
           fi
+
+  windows-dist:
+    name: Windows 版打包并挂到同一 Release
+    # 等 mac 的 dist 建好 Release 再上传；Windows 构建不需要签名 secrets，
+    # 所以不绑 release Environment，不必二次批准。
+    needs: dist
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: 标签和 VERSION 对齐
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ("v$version" -ne $env:TAG) {
+            Write-Host "❌ 标签 $env:TAG 与 VERSION 文件里的 $version 对不上，先改 VERSION 或改标签"
+            exit 1
+          }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build (release, static CRT)
+        working-directory: windows
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: 打 zip 并挂到 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $stage = "Snug-Sunlogin-Windows-$version"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item windows/target/x86_64-pc-windows-msvc/release/SnugWindows.exe $stage/
+          Copy-Item windows/scripts/setup-virtual-display.ps1 $stage/
+          Copy-Item windows/README.md $stage/
+          $zip = "$stage.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256"
+          gh release upload $env:TAG $zip "$zip.sha256" --clobber
