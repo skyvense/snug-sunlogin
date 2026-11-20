@@ -23,8 +23,8 @@ use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CreateFontW, GetDC, GetDeviceCaps, ReleaseDC, SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
-    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, FONT_PITCH_AND_FAMILY,
-    HBRUSH, HDC, HFONT, LOGPIXELSX, OUT_DEFAULT_PRECIS, TRANSPARENT,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, HBRUSH, HDC, HFONT,
+    LOGPIXELSX, OUT_DEFAULT_PRECIS, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
@@ -208,7 +208,7 @@ fn make_font(face: &str, points: i32, weight: i32, dpi: i32) -> HFONT {
             OUT_DEFAULT_PRECIS,
             CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,
-            FONT_PITCH_AND_FAMILY(DEFAULT_PITCH.0 | FF_DONTCARE.0),
+            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
             PCWSTR(face_w.as_ptr()),
         )
     }
