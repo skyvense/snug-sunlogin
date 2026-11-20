@@ -57,6 +57,21 @@ struct PhoneDeskAppTests {
         #expect(rig.desk.state.placed?.window.key == key)
     }
 
+    @Test("唤回时窗口是最小化的：在屏上永远等不到，过宽限期直接捞出来放上手机屏，不等满 10 秒")
+    func reopenMinimizedWindow() async throws {
+        let rig = try Rig()
+        await rig.ready()
+        let key = WindowKey(pid: 600, id: 31)
+        rig.apps.run(chat, pid: 600)
+        rig.windows.add(key, frame: chatHome, minimized: true)
+        let started = rig.timeline.now
+        rig.desk.open(chat)
+        await rig.desk.idle()
+        #expect(rig.desk.state.placed?.window.key == key)
+        #expect(rig.timeline.now - started >= PhoneDesk.hiddenGrace)
+        #expect(rig.timeline.now - started < PhoneDesk.windowWait)
+    }
+
     @Test("新建窗口：新窗口放上手机屏、按默认级数放大字号；已经开着的窗口不会被误认成新窗口")
     func newWindow() async throws {
         let rig = try Rig()

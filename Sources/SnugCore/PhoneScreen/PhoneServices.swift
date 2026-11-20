@@ -74,6 +74,9 @@ public protocol WindowControl: Sendable {
     func zoom(_ window: WindowKey, steps: Int) async -> Bool
     /// App 此刻在屏上的标准窗口。等新窗口出现时 0.1 秒问一次，只问当前桌面空间，一次不到 1 毫秒
     func shownWindows(of pid: Int32) async -> [WindowInfo]
+    /// App 的全部标准窗口（含最小化、藏在别的桌面空间的；没最小化的排前面）。
+    /// 在屏上等不到窗口时靠它把藏起来的那个捞出来——放上手机屏时本来就会还原、挪位
+    func standardWindows(of pid: Int32) async -> [WindowInfo]
     /// App 在问用户的那个窗口：挂着「要存储吗」的文档窗口，或单独的对话框（多个文稿没存时的「要先检查吗」）
     func askingWindow(of pid: Int32) async -> WindowInfo?
     /// 按窗口的关闭按钮（全屏的按了没反应，要先退出全屏）。找不到窗口或按钮返回 false

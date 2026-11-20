@@ -138,6 +138,18 @@ public final class WindowService: WindowControl {
         }
     }
 
+    public func standardWindows(of pid: Int32) async -> [WindowInfo] {
+        guard let app = Self.app(pid) else { return [] }
+        return await run {
+            let all = (AX.respondingWindows(pid: pid) ?? []).compactMap { element -> WindowInfo? in
+                guard AX.isStandard(element), let id = AX.windowID(element) else { return nil }
+                return Self.info(element, key: WindowKey(pid: pid, id: id), of: app)
+            }
+            // 没最小化的排前面：能直接放的先放，要先还原的垫后
+            return all.sorted { !$0.minimized && $1.minimized }
+        }
+    }
+
     public func askingWindow(of pid: Int32) async -> WindowInfo? {
         guard let app = Self.app(pid) else { return nil }
         return await run {

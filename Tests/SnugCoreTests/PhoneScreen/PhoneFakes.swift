@@ -275,6 +275,11 @@ final class FakeWindows: WindowControl {
             .sorted { $0.key.id < $1.key.id }.map { info($0.key, $0.value) }
     }
 
+    func standardWindows(of pid: Int32) async -> [WindowInfo] {
+        state.withLock { $0 }.filter { $0.key.pid == pid }
+            .sorted { $0.key.id < $1.key.id }.map { info($0.key, $0.value) }
+    }
+
     func askingWindow(of pid: Int32) async -> WindowInfo? {
         guard let a = asking.withLock({ $0 }), a.key.pid == pid else { return nil }
         if let at = a.answeredAt, (clock.withLock { $0 }?() ?? 0) >= at {

@@ -121,6 +121,9 @@ public final class PhoneDesk {
     /// 冷启动最多等多久出窗口（实测 ChatGPT 6.6 秒，更重的 App 更慢）；唤回、新建窗口实测都在 0.3 秒内，等 10 秒
     static let launchWait: TimeInterval = 30
     static let windowWait: TimeInterval = 10
+    /// 在屏上等了这么久还没有窗口，就去捞不在屏上的（最小化、别的桌面空间）：
+    /// 它们在屏清单里永远不会出现，干等只会等满超时（实测用户要乱点一阵才出来）
+    static let hiddenGrace: TimeInterval = 2
     /// 请 App 退出、请窗口关掉之后隔多久看一次结果
     static let watchPoll: TimeInterval = 0.25
     /// 最多等多久才算没动静：退出给强制退出（实测 Electron 类 App 退出要五六秒），关窗口提示无响应
@@ -916,8 +919,17 @@ public final class PhoneDesk {
 
     private func awaitWindow(of pid: Int32, excluding known: Set<WindowKey>, within seconds: TimeInterval) async -> Awaited {
         let deadline = timeline.now + seconds
+        let rescueAt = timeline.now + Self.hiddenGrace
         while wanted {
             if let window = await windows.shownWindows(of: pid).first(where: { !known.contains($0.key) }) { return .appeared(window) }
+            // 在屏上等过宽限期还没有：窗口多半最小化了、或开在别的桌面空间——在屏清单里
+            // 永远等不到。直接从 App 的窗口清单里捞一个没见过的标准窗口：放的时候本来
+            // 就会还原最小化、把窗口挪到手机屏上（place 里都有处理）
+            if timeline.now >= rescueAt,
+               let window = await windows.standardWindows(of: pid).first(where: { !known.contains($0.key) }) {
+                Log.info("在屏上等了 \(Int(Self.hiddenGrace))s 没有窗口，捞到不在屏上的 \(window.label)，直接放")
+                return .appeared(window)
+            }
             guard await apps.isRunning(pid: pid) else { return .appQuit }
             guard timeline.now < deadline else { return .timedOut }
             await timeline.sleep(Self.windowPoll)
