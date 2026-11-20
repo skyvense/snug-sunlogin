@@ -77,3 +77,8 @@ metadata:
 ### 2026-11-20 19:1x Mac 应用中心打开 App 一直转圈（已修，待真机验证）
 - 机主报：应用中心打开 App 后一直转圈，像找不到窗口，乱点一阵又移过来了。代码取证：PhoneDesk.awaitWindow 只轮询 shownWindows，而 shownWindows = AX 标准窗口 ∩ CGWindowList 在屏清单（.optionOnScreenOnly）——窗口最小化或开在别的桌面空间时永远不在清单里，只能等满超时（冷启动 30 秒/唤回 10 秒）；用户乱点把窗口弄回当前屏/取消最小化才被下一轮轮询捞到，与体感完全吻合。place() 本来就处理最小化还原与跨屏挪位，卡的只是发现环节。
 - 修复：awaitWindow 等过 2 秒宽限期（hiddenGrace）后改查新增的 standardWindows（App 全部标准窗口，没最小化的优先），捞到没见过的直接走 place，并写日志「捞到不在屏上的 X」。协议/实现/假件/回归测试齐备，main CI 全绿（44724979482，342 项）。此修复在 v2.6.2 标签之后提交，未进 2.6.2。
+
+### 2026-11-20 19:5x Windows 版补版本号与自动更新（已实现，待发版）
+- 此前 Windows exe 无任何版本标识、无更新机制。已实现：仓库根 VERSION 为单一来源，build.rs 读入后以 SNUG_VERSION 编进程序并用 winresource 写 exe FileVersion/ProductVersion 字符串；主窗口标题改为「Snug for Sunlogin — Windows 版 vX.Y.Z」，启动写文件日志。
+- 新增 windows/src/update.rs：启动静默查一次 GitHub 最新 Release（PowerShell Invoke-RestMethod 解析，只回一行「版本|zip|sha」），驱动组加「检查更新」按钮可手动查；有新版 MessageBox 确认后下载 zip、按官方 .sha256 用 Get-FileHash 验包、Expand-Archive 解压到 %TEMP%\SnugWindowsUpdate，写 swap.ps1（等旧进程退出→覆盖 SnugWindows.exe 与 setup-virtual-display.ps1→重新拉起），主进程拉起脚本（DETACHED_PROCESS，子进程继承管理员权限）后自发 WM_CLOSE 退出。版本号按数字段比较。CI 绿（44730288988）。
+- 注意自举问题：此功能在 v2.6.3 标签之后提交，2.6.3 不含它；且现装的旧版没有更新器，用户需再手动下载一次含更新器的版本，之后才能自动更新。
