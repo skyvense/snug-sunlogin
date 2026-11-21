@@ -43,6 +43,10 @@ enum RowKind {
     WindowRow,
     /// 「全部」的已安装 App。
     Installed,
+    /// 「运行中」底部的分区标题行（不可点，只画字）。
+    Section,
+    /// 「运行中」底部「常用 · 未打开」的图标块（网格排布，点击启动）。
+    CommonTile,
 }
 
 struct Item {
@@ -75,8 +79,10 @@ struct LauncherState {
     tab: Tab,
     running: Vec<RunningWindow>,
     installed: Vec<InstalledApp>,
-    /// 最近使用（Recent 目录解析出的 App 子集，无搜索时在「全部」置顶）。
+    /// 最近使用（Recent 目录解析出的 App 子集；run_action 反查启动凭据时用）。
     recent: Vec<InstalledApp>,
+    /// 使用频率表（UserAssist）：「全部」排序与「常用 · 未打开」的数据源。
+    usage: HashMap<String, apps::UsageInfo>,
     query: String,
     scroll: i32,
     rect: RECT,
@@ -189,12 +195,30 @@ pub fn open(rect: RECT) -> Result<(), String> {
     let running = apps::running_windows();
     let installed = apps::installed_apps();
     let recent = apps::recent_apps(&installed);
+    let usage = apps::usage_map();
     crate::log::write(&format!(
-        "资源库：运行中 {} 个窗口，全部 {} 个 App，最近使用 {} 个",
+        "资源库：运行中 {} 个窗口，全部 {} 个 App，最近使用 {} 个，使用频率 {} 条键",
         running.len(),
         installed.len(),
-        recent.len()
+        recent.len(),
+        usage.len()
     ));
+    // 频率排序的前几名打出来，真机上能直接核对排序对不对
+    let mut ranked: Vec<&InstalledApp> = installed.iter().collect();
+    ranked.sort_by(|a, b| {
+        let (sa, la) = apps::usage_score(&usage, a);
+        let (sb, lb) = apps::usage_score(&usage, b);
+        sb.cmp(&sa).then(lb.cmp(&la)).then(a.name.cmp(&b.name))
+    });
+    for a in ranked.iter().take(8) {
+        let u = apps::usage_of(&usage, a);
+        crate::log::write(&format!(
+            "  频率：{} 启动 {} 次{}",
+            a.name,
+            u.count,
+            if apps::is_common_app(a) { "（常用）" } else { "" }
+        ));
+    }
     for w in &running {
         crate::log::write(&format!(
             "  运行中：{}（pid {}）— {}",
@@ -209,6 +233,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
             running,
             installed,
             recent,
+            usage,
             query: String::new(),
             scroll: 0,
             rect,
@@ -658,6 +683,51 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                     }
                 }
             }
+            // 底部分区：常用软件里还没打开的，图标网格（机主要求），点了启动并全屏过来。
+            // 搜索时不拼这段——搜索只看运行中分组本身。
+            if s.query.is_empty() {
+                let mut commons: Vec<&InstalledApp> = s
+                    .installed
+                    .iter()
+                    .filter(|a| apps::is_common_app(a) && match_running(a, &s.running).is_none())
+                    .collect();
+                commons.sort_by(|a, b| {
+                    let (sa, la) = apps::usage_score(&s.usage, a);
+                    let (sb, lb) = apps::usage_score(&s.usage, b);
+                    sb.cmp(&sa).then(lb.cmp(&la)).then(a.name.cmp(&b.name))
+                });
+                commons.truncate(18);
+                if !commons.is_empty() {
+                    out.push(Item {
+                        name: "常用 · 未打开".to_string(),
+                        sub: String::new(),
+                        icon_path: String::new(),
+                        running: false,
+                        action: Action::Launch(String::new()),
+                        kind: RowKind::Section,
+                        close_hwnd: None,
+                        app_key: String::new(),
+                        win_count: 0,
+                        expanded: false,
+                        exe_path: String::new(),
+                    });
+                    for a in commons {
+                        out.push(Item {
+                            name: a.name.clone(),
+                            sub: String::new(),
+                            icon_path: a.icon_key(),
+                            running: false,
+                            action: Action::Launch(a.launch_spec()),
+                            kind: RowKind::CommonTile,
+                            close_hwnd: None,
+                            app_key: String::new(),
+                            win_count: 0,
+                            expanded: false,
+                            exe_path: a.exe_path.clone(),
+                        });
+                    }
+                }
+            }
             out
         }
         Tab::All => {
@@ -683,25 +753,20 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                     exe_path: a.exe_path.clone(),
                 }
             };
-            if !s.query.is_empty() {
-                // 搜索时平铺全部（最近里的也都在全部名单内，不必分段）
-                return s
-                    .installed
-                    .iter()
-                    .filter(|a| matches_query(&a.name, "", &s.query))
-                    .map(|a| to_item(a, false))
-                    .collect();
-            }
-            // 无搜索：最近使用置顶，其余按名字序；在最近里出现过的不要在下面重复
-            let recent_keys: HashSet<String> = s.recent.iter().map(|a| a.key()).collect();
-            let mut out: Vec<Item> = s.recent.iter().map(|a| to_item(a, true)).collect();
-            out.extend(
-                s.installed
-                    .iter()
-                    .filter(|a| !recent_keys.contains(&a.key()))
-                    .map(|a| to_item(a, false)),
-            );
-            out
+            // 按使用频率倒排（UserAssist 次数 + 常用加权，并列比最近使用时间），
+            // 搜索时先过滤再同序。原先的「最近使用置顶」取消：它的数据源（Recent
+            // 文件夹）在真机上只有文件快捷方式、凑不出 App，并入频率排序更实在。
+            let mut sorted: Vec<&InstalledApp> = s
+                .installed
+                .iter()
+                .filter(|a| matches_query(&a.name, "", &s.query))
+                .collect();
+            sorted.sort_by(|a, b| {
+                let (sa, la) = apps::usage_score(&s.usage, a);
+                let (sb, lb) = apps::usage_score(&s.usage, b);
+                sb.cmp(&sa).then(lb.cmp(&la)).then(a.name.cmp(&b.name))
+            });
+            sorted.iter().map(|a| to_item(a, false)).collect()
         }
     }
 }
@@ -755,34 +820,60 @@ fn cols_for(width: i32) -> i32 {
     ((width - 32) / TILE_MIN_W).max(1)
 }
 
-fn content_height(tab: Tab, count: usize, width: i32) -> i32 {
-    match tab {
-        Tab::Running => count as i32 * ROW_H,
-        Tab::All => ((count as i32 + cols_for(width) - 1) / cols_for(width)) * TILE_H,
-    }
-}
+/// 分区标题行高（「运行中」底部的「常用 · 未打开」）。
+const SECTION_H: i32 = 54;
 
-fn item_rect(tab: Tab, scroll: i32, index: usize, width: i32) -> RECT {
-    match tab {
-        Tab::Running => RECT {
-            left: 0,
-            top: CONTENT_TOP + index as i32 * ROW_H - scroll,
-            right: width,
-            bottom: CONTENT_TOP + (index as i32 + 1) * ROW_H - scroll,
-        },
-        Tab::All => {
-            let cols = cols_for(width);
-            let tile_w = (width - 32) / cols;
-            let col = index as i32 % cols;
-            let row = index as i32 / cols;
-            RECT {
+/// 一次把所有条目的矩形算好（top 从内容区 0 起，滚动偏移由调用方加）：
+/// 「全部」全是图标块；「运行中」是行（ROW_H）+ 标题行（SECTION_H）+ 图标块
+/// 网格的混合排布。绘制、命中、滚动高度都吃这同一份布局，不许各算各的。
+fn layout_items(tab: Tab, items: &[Item], width: i32) -> Vec<RECT> {
+    let cols = cols_for(width);
+    let tile_w = (width - 32) / cols;
+    let mut rects = Vec::with_capacity(items.len());
+    let mut y = 0i32;
+    let mut col = 0i32; // 当前网格行已排的块数（只对连续图标块有意义）
+    for item in items {
+        let is_tile = tab == Tab::All || item.kind == RowKind::CommonTile;
+        if is_tile {
+            rects.push(RECT {
                 left: 16 + col * tile_w,
-                top: CONTENT_TOP + row * TILE_H - scroll,
+                top: y,
                 right: 16 + (col + 1) * tile_w,
-                bottom: CONTENT_TOP + (row + 1) * TILE_H - scroll,
+                bottom: y + TILE_H,
+            });
+            col += 1;
+            if col >= cols {
+                col = 0;
+                y += TILE_H;
             }
+        } else {
+            if col > 0 {
+                col = 0;
+                y += TILE_H;
+            }
+            let hh = if item.kind == RowKind::Section {
+                SECTION_H
+            } else {
+                ROW_H
+            };
+            rects.push(RECT {
+                left: 0,
+                top: y,
+                right: width,
+                bottom: y + hh,
+            });
+            y += hh;
         }
     }
+    rects
+}
+
+fn content_height(tab: Tab, items: &[Item], width: i32) -> i32 {
+    layout_items(tab, items, width)
+        .iter()
+        .map(|r| r.bottom)
+        .max()
+        .unwrap_or(0)
 }
 
 fn tab_rects(width: i32) -> (RECT, RECT, RECT) {
@@ -847,7 +938,7 @@ fn refresh_running(hwnd: HWND) {
             unsafe {
                 let _ = GetClientRect(hwnd, &mut rc);
             }
-            let max_scroll = (content_height(s.tab, items.len(), rc.right - rc.left)
+            let max_scroll = (content_height(s.tab, &items, rc.right - rc.left)
                 - (rc.bottom - rc.top - CONTENT_TOP))
             .max(0);
             s.scroll = s.scroll.clamp(0, max_scroll);
@@ -1113,14 +1204,28 @@ fn paint(hwnd: HWND) {
                 };
                 draw_text(mem, msg, &mut tr, DT_CENTER | DT_SINGLELINE);
             }
+            let rects = layout_items(tab, &items, w);
             for (i, item) in items.iter().enumerate() {
-                let r = item_rect(tab, scroll, i, w);
+                let mut r = rects[i];
+                r.top += CONTENT_TOP - scroll;
+                r.bottom += CONTENT_TOP - scroll;
                 if r.bottom < CONTENT_TOP || r.top > h {
                     continue;
                 }
                 let icon = icon_cached(&item.icon_path);
-                match tab {
-                    Tab::Running => {
+                if item.kind == RowKind::Section {
+                    // 分区标题（如「常用 · 未打开」）：靠左下对齐的灰字，不可点
+                    SelectObject(mem, HGDIOBJ(font_name.0));
+                    SetTextColor(mem, rgb(125, 125, 133));
+                    let mut tr = RECT {
+                        left: 20,
+                        top: r.top,
+                        right: w - 20,
+                        bottom: r.bottom,
+                    };
+                    draw_text(mem, &item.name, &mut tr, DT_LEFT | DT_BOTTOM | DT_SINGLELINE);
+                    SetTextColor(mem, rgb(30, 30, 34));
+                } else if tab == Tab::Running && item.kind != RowKind::CommonTile {
                         let is_window_row = item.kind == RowKind::WindowRow;
                         // 文字右界给行尾按钮让位
                         let text_right = expand_chip_rect(item, r, w)
@@ -1207,9 +1312,8 @@ fn paint(hwnd: HWND) {
                             }
                         }
                     }
-                    Tab::All => {
-                        let tile_w = (w - 32) / cols_for(w);
-                        let cx = r.left + tile_w / 2;
+                } else {
+                        let cx = (r.left + r.right) / 2;
                         if let Some(hicon) = icon {
                             let _ = DrawIconEx(
                                 mem,
@@ -1239,7 +1343,6 @@ fn paint(hwnd: HWND) {
                             SelectObject(mem, old);
                             let _ = DeleteObject(HGDIOBJ(dot.0));
                         }
-                    }
                 }
             }
             SelectObject(mem, old_font);
@@ -1334,7 +1437,7 @@ unsafe extern "system" fn launcher_proc(
                     unsafe {
                         let _ = GetClientRect(hwnd, &mut rc);
                     }
-                    let max_scroll = (content_height(s.tab, items.len(), rc.right - rc.left)
+                    let max_scroll = (content_height(s.tab, &items, rc.right - rc.left)
                         - (rc.bottom - rc.top - CONTENT_TOP))
                         .max(0);
                     s.scroll = (s.scroll - delta / 120 * 57).clamp(0, max_scroll);
@@ -1381,9 +1484,15 @@ unsafe extern "system" fn launcher_proc(
                 let cell = c.borrow();
                 let s = cell.as_ref()?;
                 let items = current_items(s);
+                let rects = layout_items(s.tab, &items, w);
                 items.iter().enumerate().find_map(|(i, item)| {
-                    let r = item_rect(s.tab, s.scroll, i, w);
+                    let mut r = rects[i];
+                    r.top += CONTENT_TOP - s.scroll;
+                    r.bottom += CONTENT_TOP - s.scroll;
                     if !(x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+                        return None;
+                    }
+                    if item.kind == RowKind::Section {
                         return None;
                     }
                     let inside =
