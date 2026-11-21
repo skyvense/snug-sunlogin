@@ -846,6 +846,19 @@ pub fn usage_map() -> HashMap<String, UsageInfo> {
     map
 }
 
+/// 使用记录的命中方式（可信度从高到低）：决定同 exe 去重时谁有资格留次数。
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum MatchKind {
+    /// 完整路径/AUMID/裸名字精确命中——这条 App 自己的记录。
+    Exact,
+    /// 快捷方式文件名命中（{F4E57C4B} 组的按-lnk 记账）——也是它自己的。
+    LnkStem,
+    /// 靠 exe/名字主干继承到的记录——同 exe 的兄弟共享同一份，是「借来的」。
+    Stem,
+    /// 没记录。
+    None,
+}
+
 /// 查一个 App 的使用记录，按可信度从高到低逐个试：
 /// 快捷方式完整路径 → exe 完整路径 → AUMID → 裸名字 → 快捷方式文件名
 /// （{F4E57C4B} 组的按-lnk 记账）→ exe 主干 → 名字主干。
@@ -853,39 +866,99 @@ pub fn usage_map() -> HashMap<String, UsageInfo> {
 /// 已知文件夹 GUID 前缀的（{1AC14E77}\cmd.exe），完整路径对不上、只能
 /// 靠主干命中——结果所有指向 cmd.exe 的快捷方式（VS 提示符一排）人人
 /// 顶着 cmd 的 14 次挤在榜首；而它们各自的 lnk 记录其实是 0 次。
-pub fn usage_of(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> UsageInfo {
-    let mut candidates: Vec<String> = Vec::new();
+pub fn usage_of_ex(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> (UsageInfo, MatchKind) {
+    let mut candidates: Vec<(String, MatchKind)> = Vec::new();
     if !a.lnk_path.is_empty() {
-        candidates.push(format!("raw:{}", a.lnk_path.to_lowercase()));
+        candidates.push((format!("raw:{}", a.lnk_path.to_lowercase()), MatchKind::Exact));
     }
     if !a.exe_path.is_empty() {
-        candidates.push(format!("raw:{}", a.exe_path.to_lowercase()));
+        candidates.push((format!("raw:{}", a.exe_path.to_lowercase()), MatchKind::Exact));
     }
     if !a.aumid.is_empty() {
-        candidates.push(format!("raw:{}", a.aumid.to_lowercase()));
+        candidates.push((format!("raw:{}", a.aumid.to_lowercase()), MatchKind::Exact));
     }
-    candidates.push(format!("raw:{}", a.name.to_lowercase()));
+    candidates.push((format!("raw:{}", a.name.to_lowercase()), MatchKind::Exact));
     if !a.lnk_path.is_empty() {
-        candidates.push(format!("lnk:{}", stem_of(&a.lnk_path)));
+        candidates.push((format!("lnk:{}", stem_of(&a.lnk_path)), MatchKind::LnkStem));
     }
     if !a.exe_path.is_empty() {
-        candidates.push(format!("stem:{}", stem_of(&a.exe_path)));
+        candidates.push((format!("stem:{}", stem_of(&a.exe_path)), MatchKind::Stem));
     }
-    candidates.push(format!("stem:{}", stem_of(&a.name)));
-    for k in candidates {
+    candidates.push((format!("stem:{}", stem_of(&a.name)), MatchKind::Stem));
+    for (k, kind) in candidates {
         if let Some(u) = map.get(&k) {
-            return *u;
+            return (*u, kind);
         }
     }
-    UsageInfo::default()
+    (UsageInfo::default(), MatchKind::None)
+}
+
+/// 查一个 App 的使用记录（不关心命中方式时用）。
+pub fn usage_of(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> UsageInfo {
+    usage_of_ex(map, a).0
+}
+
+/// 给一批 App 算「有效」使用记录（键是 App 的 key()）：在 usage_of 之上做
+/// 同 exe 去重。靠主干继承的次数是同一个 exe 的总账，一排指向 cmd.exe 的
+/// 快捷方式人人顶着它霸榜没有意义：同 exe 组里只要有人拿的是自己的记录
+/// （精确/按-lnk），继承组全体清零；全员继承时只留名字最靠前的一个。
+pub fn effective_usage(
+    map: &HashMap<String, UsageInfo>,
+    apps: &[InstalledApp],
+) -> HashMap<String, UsageInfo> {
+    let mut out: HashMap<String, UsageInfo> = HashMap::new();
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut kinds: Vec<MatchKind> = Vec::with_capacity(apps.len());
+    for (i, a) in apps.iter().enumerate() {
+        let (u, kind) = usage_of_ex(map, a);
+        kinds.push(kind);
+        out.insert(a.key(), u);
+        if !a.exe_path.is_empty() {
+            groups
+                .entry(a.exe_path.to_lowercase())
+                .or_default()
+                .push(i);
+        }
+    }
+    for (_, idxs) in groups {
+        if idxs.len() < 2 {
+            continue;
+        }
+        let has_own = idxs
+            .iter()
+            .any(|&i| matches!(kinds[i], MatchKind::Exact | MatchKind::LnkStem));
+        let stem_idxs: Vec<usize> = idxs
+            .iter()
+            .copied()
+            .filter(|&i| kinds[i] == MatchKind::Stem)
+            .collect();
+        if stem_idxs.is_empty() {
+            continue;
+        }
+        // 全员继承时留一个代表（名字最靠前）；已有人拿自己记录时继承组全清零
+        let keep: Option<usize> = if has_own {
+            None
+        } else {
+            stem_idxs
+                .iter()
+                .copied()
+                .min_by(|&x, &y| apps[x].name.cmp(&apps[y].name))
+        };
+        for i in stem_idxs {
+            if Some(i) != keep {
+                out.insert(apps[i].key(), UsageInfo::default());
+            }
+        }
+    }
+    out
 }
 
 /// 常用软件加权：没用过的常用软件也能排到长尾前面（机主要求 Office、计算器这类靠前）。
 pub const COMMON_BOOST: i64 = 100;
 
-/// 排序分：启动次数 + 常用加权；并列再比最近使用时间。返回 (分数, 最近时间)。
-pub fn usage_score(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> (i64, u64) {
-    let u = usage_of(map, a);
+/// 排序分：有效启动次数（经 effective_usage 去重）+ 常用加权；
+/// 并列再比最近使用时间。返回 (分数, 最近时间)。
+pub fn score_of(u: UsageInfo, a: &InstalledApp) -> (i64, u64) {
     let boost = if is_common_app(a) { COMMON_BOOST } else { 0 };
     (u.count as i64 + boost, u.last)
 }

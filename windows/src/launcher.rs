@@ -83,6 +83,8 @@ struct LauncherState {
     recent: Vec<InstalledApp>,
     /// 使用频率表（UserAssist）：「全部」排序与「常用 · 未打开」的数据源。
     usage: HashMap<String, apps::UsageInfo>,
+    /// 有效使用记录（usage 经同 exe 去重后的结果，键是 App 的 key()）：排序实际吃这份。
+    eff: HashMap<String, apps::UsageInfo>,
     query: String,
     scroll: i32,
     rect: RECT,
@@ -196,6 +198,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
     let installed = apps::installed_apps();
     let recent = apps::recent_apps(&installed);
     let usage = apps::usage_map();
+    let eff = apps::effective_usage(&usage, &installed);
     crate::log::write(&format!(
         "资源库：运行中 {} 个窗口，全部 {} 个 App，最近使用 {} 个，使用频率 {} 条键",
         running.len(),
@@ -203,15 +206,15 @@ pub fn open(rect: RECT) -> Result<(), String> {
         recent.len(),
         usage.len()
     ));
-    // 频率排序的前几名打出来，真机上能直接核对排序对不对
+    // 频率排序的前几名打出来（用去重后的有效次数），真机上能直接核对排序对不对
     let mut ranked: Vec<&InstalledApp> = installed.iter().collect();
     ranked.sort_by(|a, b| {
-        let (sa, la) = apps::usage_score(&usage, a);
-        let (sb, lb) = apps::usage_score(&usage, b);
+        let (sa, la) = apps::score_of(eff.get(&a.key()).copied().unwrap_or_default(), a);
+        let (sb, lb) = apps::score_of(eff.get(&b.key()).copied().unwrap_or_default(), b);
         sb.cmp(&sa).then(lb.cmp(&la)).then(a.name.cmp(&b.name))
     });
     for a in ranked.iter().take(8) {
-        let u = apps::usage_of(&usage, a);
+        let u = eff.get(&a.key()).copied().unwrap_or_default();
         crate::log::write(&format!(
             "  频率：{} 启动 {} 次{}",
             a.name,
@@ -234,6 +237,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
             installed,
             recent,
             usage,
+            eff,
             query: String::new(),
             scroll: 0,
             rect,
@@ -692,8 +696,8 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                     .filter(|a| apps::is_common_app(a) && match_running(a, &s.running).is_none())
                     .collect();
                 commons.sort_by(|a, b| {
-                    let (sa, la) = apps::usage_score(&s.usage, a);
-                    let (sb, lb) = apps::usage_score(&s.usage, b);
+                    let (sa, la) = apps::score_of(s.eff.get(&a.key()).copied().unwrap_or_default(), a);
+                    let (sb, lb) = apps::score_of(s.eff.get(&b.key()).copied().unwrap_or_default(), b);
                     sb.cmp(&sa).then(lb.cmp(&la)).then(a.name.cmp(&b.name))
                 });
                 commons.truncate(18);
@@ -762,8 +766,8 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                 .filter(|a| matches_query(&a.name, "", &s.query))
                 .collect();
             sorted.sort_by(|a, b| {
-                let (sa, la) = apps::usage_score(&s.usage, a);
-                let (sb, lb) = apps::usage_score(&s.usage, b);
+                let (sa, la) = apps::score_of(s.eff.get(&a.key()).copied().unwrap_or_default(), a);
+                let (sb, lb) = apps::score_of(s.eff.get(&b.key()).copied().unwrap_or_default(), b);
                 sb.cmp(&sa).then(lb.cmp(&la)).then(a.name.cmp(&b.name))
             });
             sorted.iter().map(|a| to_item(a, false)).collect()
