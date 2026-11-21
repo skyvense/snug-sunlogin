@@ -12,7 +12,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use windows::core::{Interface, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{CloseHandle, BOOL, HKEY, HWND, LPARAM, POINT, RECT};
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, HKEY_CURRENT_USER, KEY_READ,
+    REG_BINARY,
+};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER,
     CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
@@ -686,4 +690,214 @@ fn window_center_in(hwnd: HWND, rect: RECT) -> bool {
     let cx = (r.left + r.right) / 2;
     let cy = (r.top + r.bottom) / 2;
     cx >= rect.left && cx < rect.right && cy >= rect.top && cy < rect.bottom
+}
+
+// MARK: 使用频率（UserAssist）与常用软件
+
+/// 一条使用记录：累计启动次数 + 最近一次启动时间（FILETIME，100ns 单位）。
+#[derive(Clone, Copy, Default)]
+pub struct UsageInfo {
+    pub count: u32,
+    pub last: u64,
+}
+
+/// UserAssist 的值名是 ROT13 编码的，只转字母。
+fn rot13(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'a'..='m' | 'A'..='M' => (c as u8 + 13) as char,
+            'n'..='z' | 'N'..='Z' => (c as u8 - 13) as char,
+            _ => c,
+        })
+        .collect()
+}
+
+/// 文件名主干：去目录、去最后一个扩展名（"C:\a\WINWORD.EXE" → "winword"，已小写输入）。
+fn stem_of(path: &str) -> String {
+    let base = path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    match base.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem.to_string(),
+        _ => base,
+    }
+}
+
+/// 从一个解码后的 UserAssist 条目名派生查询键（同一条存多份，查的时候逐个试）：
+/// raw: 是整串小写（完整路径 / AUMID / 裸名字），stem: 是文件名主干。
+fn usage_keys(decoded: &str) -> Vec<String> {
+    let lower = decoded.to_lowercase();
+    let mut keys = vec![format!("raw:{lower}")];
+    let stem = stem_of(decoded);
+    if !stem.is_empty() {
+        keys.push(format!("stem:{stem}"));
+    }
+    keys
+}
+
+/// 读注册表 UserAssist（开始菜单「常用应用」背后的数据源）：
+/// HKCU\...\Explorer\UserAssist\{GUID}\Count 下每个值，名字是 ROT13 编码的程序
+/// 路径/名字，数据是二进制：偏移 4 是启动次数；72 字节新格式偏移 60 是最近
+/// 启动的 FILETIME（旧 16 字节格式在偏移 8）。UEME_ 开头的是会话统计条目，
+/// 与普通启动条目重复，跳过。同键多条：次数相加、时间取新。
+pub fn usage_map() -> HashMap<String, UsageInfo> {
+    let mut map: HashMap<String, UsageInfo> = HashMap::new();
+    let root_path = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist");
+    unsafe {
+        let mut root = HKEY::default();
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(root_path.as_ptr()),
+            None,
+            KEY_READ,
+            &mut root,
+        )
+        .0 != 0
+        {
+            return map;
+        }
+        let mut gi = 0u32;
+        loop {
+            let mut gname = [0u16; 128];
+            let mut glen = gname.len() as u32;
+            let st = RegEnumKeyExW(
+                root,
+                gi,
+                Some(PWSTR(gname.as_mut_ptr())),
+                &mut glen,
+                None,
+                None,
+                None,
+                None,
+            );
+            if st.0 != 0 {
+                break;
+            }
+            gi += 1;
+            let guid = String::from_utf16_lossy(&gname[..glen as usize]);
+            let count_path = wide(&format!("{guid}\\Count"));
+            let mut ck = HKEY::default();
+            if RegOpenKeyExW(root, PCWSTR(count_path.as_ptr()), None, KEY_READ, &mut ck).0 != 0 {
+                continue;
+            }
+            let mut vi = 0u32;
+            loop {
+                let mut vname = vec![0u16; 1024];
+                let mut vlen = vname.len() as u32;
+                let mut vtype = 0u32;
+                let mut data = vec![0u8; 256];
+                let mut dlen = data.len() as u32;
+                let st = RegEnumValueW(
+                    ck,
+                    vi,
+                    Some(PWSTR(vname.as_mut_ptr())),
+                    &mut vlen,
+                    None,
+                    Some(&mut vtype),
+                    Some(data.as_mut_ptr()),
+                    Some(&mut dlen),
+                );
+                if st.0 != 0 {
+                    break;
+                }
+                vi += 1;
+                if vtype != REG_BINARY.0 || (dlen as usize) < 8 {
+                    continue;
+                }
+                let raw_name = String::from_utf16_lossy(&vname[..vlen as usize]);
+                let decoded = rot13(&raw_name);
+                if decoded.starts_with("UEME_") || decoded.is_empty() {
+                    continue;
+                }
+                let d = &data[..dlen as usize];
+                let count = u32::from_le_bytes(d[4..8].try_into().unwrap());
+                let last = if d.len() >= 68 {
+                    u64::from_le_bytes(d[60..68].try_into().unwrap())
+                } else if d.len() >= 16 {
+                    u64::from_le_bytes(d[8..16].try_into().unwrap())
+                } else {
+                    0
+                };
+                for k in usage_keys(&decoded) {
+                    let e = map.entry(k).or_default();
+                    e.count = e.count.saturating_add(count);
+                    e.last = e.last.max(last);
+                }
+            }
+            let _ = RegCloseKey(ck);
+        }
+        let _ = RegCloseKey(root);
+    }
+    map
+}
+
+/// 查一个 App 的使用记录：完整 exe 路径 → AUMID → exe 主干 → 名字，逐个试。
+pub fn usage_of(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> UsageInfo {
+    let mut candidates: Vec<String> = Vec::new();
+    if !a.exe_path.is_empty() {
+        candidates.push(format!("raw:{}", a.exe_path.to_lowercase()));
+    }
+    if !a.aumid.is_empty() {
+        candidates.push(format!("raw:{}", a.aumid.to_lowercase()));
+    }
+    if !a.exe_path.is_empty() {
+        candidates.push(format!("stem:{}", stem_of(&a.exe_path)));
+    }
+    candidates.push(format!("raw:{}", a.name.to_lowercase()));
+    candidates.push(format!("stem:{}", stem_of(&a.name)));
+    for k in candidates {
+        if let Some(u) = map.get(&k) {
+            return *u;
+        }
+    }
+    UsageInfo::default()
+}
+
+/// 常用软件加权：没用过的常用软件也能排到长尾前面（机主要求 Office、计算器这类靠前）。
+pub const COMMON_BOOST: i64 = 100;
+
+/// 排序分：启动次数 + 常用加权；并列再比最近使用时间。返回 (分数, 最近时间)。
+pub fn usage_score(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> (i64, u64) {
+    let u = usage_of(map, a);
+    let boost = if is_common_app(a) { COMMON_BOOST } else { 0 };
+    (u.count as i64 + boost, u.last)
+}
+
+/// 是不是常用软件：按 exe 主干 / 显示名 / AUMID 认。
+/// 名单按机主点名的方向收：Office 与 WPS、系统小工具、浏览器、国产办公 IM、开发工具。
+pub fn is_common_app(a: &InstalledApp) -> bool {
+    const STEMS: &[&str] = &[
+        "winword", "excel", "powerpoint", "outlook", "onenote", "msaccess", "mspub", "visio",
+        "wps", "et", "wpp", "calc", "calculator", "notepad", "mspaint", "paint", "snippingtool",
+        "explorer", "cmd", "powershell", "pwsh", "wt", "windowsterminal", "chrome", "msedge",
+        "firefox", "wechat", "wxwork", "dingtalk", "feishu", "lark", "qq", "tim", "wemeetapp",
+        "code", "devenv", "idea64", "pycharm64", "vlc", "potplayer", "spotify", "awesun",
+        "sunloginclient", "taskmgr", "control",
+    ];
+    if !a.exe_path.is_empty() && STEMS.contains(&stem_of(&a.exe_path).as_str()) {
+        return true;
+    }
+    const NAME_BITS: &[&str] = &[
+        "microsoft word", "microsoft excel", "microsoft powerpoint", "microsoft outlook",
+        "microsoft onenote", "microsoft access", "microsoft visio", "wps office",
+        "计算器", "calculator", "记事本", "notepad", "画图", "截图工具", "snipping tool",
+        "文件资源管理器", "设置", "settings", "微信", "wechat", "企业微信", "钉钉", "dingtalk",
+        "飞书", "feishu", "腾讯会议", "向日葵", "sunlogin", "google chrome", "microsoft edge",
+        "firefox", "火狐", "visual studio code", "windows terminal", "终端", "命令提示符",
+        "powershell", "任务管理器", "task manager", "控制面板", "control panel",
+        "spotify", "vlc", "potplayer",
+    ];
+    let name = a.name.to_lowercase();
+    if NAME_BITS.iter().any(|b| name.contains(b)) {
+        return true;
+    }
+    const AUMID_BITS: &[&str] = &[
+        "microsoft.office", "windowscalculator", "windowsnotepad", "microsoft.paint",
+        "microsoft.screensketch", "microsoft.windowsterminal", "windows.immersivecontrolpanel",
+    ];
+    let aumid = a.aumid.to_lowercase();
+    AUMID_BITS.iter().any(|b| aumid.contains(b))
 }
