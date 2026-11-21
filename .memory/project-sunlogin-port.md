@@ -150,3 +150,9 @@ metadata:
 - 实测（ThinkBook SnugTest2，构建 b55f681，自动模式）：日志 1064 条键；前八 = Notepad 34、Chrome 11、Edge 4、AweSun 3、Anaconda Powershell 1、Windows PowerShell 1、Firefox 1、WeChat 0（全带常用标）。截图核验：运行中 tab 见常用 grid（Notepad/Chrome/Edge/AweSun/…/Excel/Word/腾讯会议），全部 tab 前排即频率序，计算器在常用包内（第 5 行）。注意：UserAssist 记的是启动次数，常开型应用（微信/浏览器）天然低分，靠常用加成留在前排——这是数据特性不是 bug。
 - 截图方法备忘（远程截虚拟屏上的窗口）：awesun 截图只拍主屏；把启动器窗口移来主屏要过三关——①脚本里 GetClassNameW 必须带 CharSet.Unicode，否则类名只回首字母、永远 NOT-FOUND；②Snug 是提权进程，非提权脚本 SetWindowPos 被 UIPI 静默无效，须 Run 对话框里 Start-Process -Verb RunAs 提权后同级移动（坐标走脚本进程的 DPI 虚拟化空间，1030×1030 落点约 (430,25)）；③启动器开关是 toggle，点前先看日志定状态，点后别再乱点。移窗脚本 mv3b.ps1 在本机 ~/workspace/sunlogin-cli/，结果写 mv3result.txt 走文件通道回读。
 - 待机主：与 CCD 修复同分支一并等合并/发版决定（机主 13:31 定「先不合，我自己再测测」不变）。
+
+## 2026-11-21 傍晚 · 启动器页眉放大（同分支续）
+
+- 机主看完频率版截图后点名：最上面一行放大美化，随后 уточ уточ——明确指「运行中/全部」两个按钮要大、搜索框不用那么长。
+- 改动（launcher.rs）：页眉 64→96 改白带 + 底边分隔线；标题字 38→54；页签最终定格 168×60、字 40 号（金色滑块分段控件）；关闭钮圆径随行高到 60；搜索框去 WS_BORDER 方框，改绘制侧圆角描边（search_rect 与创建位置同源）、加「搜索 App」提示词、宽度封顶 320。
+- 实测（ThinkBook SnugTest2，构建 7f4fbf5）：移窗截图核验——页签明显大、搜索框短、标题与关闭钮同步放大，见主会话 17:00 截图。分支仍未合未发，状态不变。
