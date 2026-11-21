@@ -788,7 +788,10 @@ pub fn usage_map() -> HashMap<String, UsageInfo> {
                 let mut vname = vec![0u16; 1024];
                 let mut vlen = vname.len() as u32;
                 let mut vtype = 0u32;
-                let mut data = vec![0u8; 256];
+                // 缓冲要够大：真机实测个别 UA 值的数据有 1612 字节（远超标准 72），
+                // 缓冲不足会返回 ERROR_MORE_DATA——那种条目跳过即可，绝不能 break，
+                // 否则它后面的几百条全丢（第一版就这么只读到 1 条）。
+                let mut data = vec![0u8; 8192];
                 let mut dlen = data.len() as u32;
                 let st = RegEnumValueW(
                     ck,
@@ -800,6 +803,11 @@ pub fn usage_map() -> HashMap<String, UsageInfo> {
                     Some(data.as_mut_ptr()),
                     Some(&mut dlen),
                 );
+                if st.0 == 234 {
+                    // ERROR_MORE_DATA：这一条太大，跳过继续下一条
+                    vi += 1;
+                    continue;
+                }
                 if st.0 != 0 {
                     break;
                 }
