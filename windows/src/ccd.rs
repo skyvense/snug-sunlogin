@@ -44,7 +44,7 @@ fn query_all() -> Result<
         Vec<DISPLAYCONFIG_PATH_INFO>,
         Vec<DISPLAYCONFIG_MODE_INFO>,
     ),
-    i32,
+    u32,
 > {
     unsafe {
         let mut npaths = 0u32;
