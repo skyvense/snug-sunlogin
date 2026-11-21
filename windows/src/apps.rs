@@ -727,13 +727,17 @@ fn stem_of(path: &str) -> String {
 }
 
 /// 从一个解码后的 UserAssist 条目名派生查询键（同一条存多份，查的时候逐个试）：
-/// raw: 是整串小写（完整路径 / AUMID / 裸名字），stem: 是文件名主干。
+/// raw: 是整串小写（完整路径 / AUMID / 裸名字），stem: 是文件名主干，
+/// lnk: 只给 .lnk 条目（{F4E57C4B} 组按快捷方式记账），键是快捷方式文件名主干。
 fn usage_keys(decoded: &str) -> Vec<String> {
     let lower = decoded.to_lowercase();
     let mut keys = vec![format!("raw:{lower}")];
     let stem = stem_of(decoded);
     if !stem.is_empty() {
         keys.push(format!("stem:{stem}"));
+    }
+    if lower.ends_with(".lnk") && !stem.is_empty() {
+        keys.push(format!("lnk:{stem}"));
     }
     keys
 }
@@ -842,10 +846,13 @@ pub fn usage_map() -> HashMap<String, UsageInfo> {
     map
 }
 
-/// 查一个 App 的使用记录：快捷方式路径 → 完整 exe 路径 → AUMID → exe 主干
-/// → 名字，逐个试。快捷方式优先：UserAssist 的 {F4E57C4B} 组按 .lnk 记账，
-/// 先认它，指向同一个 exe 的一堆快捷方式（各种 VS 命令行提示符都指
-/// cmd.exe）才不会人人顶着 exe 的总次数挤在榜首。
+/// 查一个 App 的使用记录，按可信度从高到低逐个试：
+/// 快捷方式完整路径 → exe 完整路径 → AUMID → 裸名字 → 快捷方式文件名
+/// （{F4E57C4B} 组的按-lnk 记账）→ exe 主干 → 名字主干。
+/// 「快捷方式文件名」排在「exe 主干」前面是真机教训：cmd.exe 的记录是
+/// 已知文件夹 GUID 前缀的（{1AC14E77}\cmd.exe），完整路径对不上、只能
+/// 靠主干命中——结果所有指向 cmd.exe 的快捷方式（VS 提示符一排）人人
+/// 顶着 cmd 的 14 次挤在榜首；而它们各自的 lnk 记录其实是 0 次。
 pub fn usage_of(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> UsageInfo {
     let mut candidates: Vec<String> = Vec::new();
     if !a.lnk_path.is_empty() {
@@ -857,10 +864,13 @@ pub fn usage_of(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> UsageInfo
     if !a.aumid.is_empty() {
         candidates.push(format!("raw:{}", a.aumid.to_lowercase()));
     }
+    candidates.push(format!("raw:{}", a.name.to_lowercase()));
+    if !a.lnk_path.is_empty() {
+        candidates.push(format!("lnk:{}", stem_of(&a.lnk_path)));
+    }
     if !a.exe_path.is_empty() {
         candidates.push(format!("stem:{}", stem_of(&a.exe_path)));
     }
-    candidates.push(format!("raw:{}", a.name.to_lowercase()));
     candidates.push(format!("stem:{}", stem_of(&a.name)));
     for k in candidates {
         if let Some(u) = map.get(&k) {
