@@ -751,13 +751,13 @@ fn status_info(
     if vdd::settings_exists() {
         return (
             "虚拟屏未启动".to_string(),
-            "驱动可能没装好或被禁用，点「安装 VDD」排查".to_string(),
+            "驱动可能没装好或被禁用，打开配置向导排查".to_string(),
             StatusLevel::Warn,
         );
     }
     (
         "未检测到虚拟屏驱动".to_string(),
-        "先点「安装 VDD」装驱动，再创建手机屏".to_string(),
+        "先打开配置向导装驱动，再创建手机屏".to_string(),
         StatusLevel::Neutral,
     )
 }
@@ -1737,7 +1737,10 @@ unsafe extern "system" fn main_wnd_proc(
                 let _ = GetClientRect(hwnd, &mut rc);
             }
             layout_controls(rc.right - rc.left, rc.bottom - rc.top);
-            ui_log("Snug for Sunlogin — Windows 测试版 v0.1.0（Rust）");
+            ui_log(&format!(
+                "Snug for Sunlogin — Windows 版 v{}（Rust）",
+                env!("SNUG_VERSION")
+            ));
             ui_log(&format!("日志文件：{}", log::dir().join("snug-windows.log").display()));
             ui_log("范围：只做虚拟屏与串流测试，不做手势翻译");
             refresh_displays();
@@ -1949,12 +1952,19 @@ unsafe extern "system" fn main_wnd_proc(
                     .unwrap_or((false, false))
             });
             // 只拆自动建的：手动建的屏留给用户自己决定
-            if auto && owned && has_virtual {
-                ui_log("自动关闭资源库并移除手机屏…");
+            if auto && owned {
+                ui_log("自动关闭资源库并还原窗口…");
                 launcher::close_all();
-                // 先还原窗口再拆屏：屏一拆，留在上面的窗口会被系统胡乱塞位置
+                // 先还原窗口再拆屏：屏一拆，留在上面的窗口会被系统胡乱塞位置。
+                // 还原不以「虚拟屏还在」为门：向日葵会在会话结束时先把虚拟屏摘出
+                // 拓扑（2026-11-21 实证），等我们处理时屏常常已经不在了——被全屏过
+                // 的窗口（touched）照样能按登记还原，普查快照的没了参照系才跳过。
                 restore_session_windows();
-                remove_phone_screen();
+                if has_virtual {
+                    remove_phone_screen();
+                } else {
+                    ui_log("虚拟屏已被向日葵摘除，跳过拆屏");
+                }
                 set_screen_owner(false);
             } else {
                 // 不拆也要把三个条件的值打出来，下次一看日志就知道卡在哪个条件
