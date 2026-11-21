@@ -1460,8 +1460,8 @@ unsafe extern "system" fn launcher_proc(
                         let _ = SendMessageW(
                             search,
                             WM_SETFONT,
-                            WPARAM(f.0 as usize),
-                            LPARAM(1),
+                            Some(WPARAM(f.0 as usize)),
+                            Some(LPARAM(1)),
                         );
                     }
                     // EM_SETCUEBANNER = 0x1501：空框时显示灰色提示词
@@ -1469,8 +1469,8 @@ unsafe extern "system" fn launcher_proc(
                     let _ = SendMessageW(
                         search,
                         0x1501,
-                        WPARAM(0),
-                        LPARAM(cue.as_ptr() as isize),
+                        Some(WPARAM(0)),
+                        Some(LPARAM(cue.as_ptr() as isize)),
                     );
                 }
             }
