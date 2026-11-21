@@ -6,6 +6,8 @@ use std::path::PathBuf;
 pub struct Settings {
     pub phone_model_id: String,
     pub auto_create: bool,
+    /// 高级模式：主控连入时只输出虚拟屏（物理屏全部关掉），断开时恢复。
+    pub only_virtual: bool,
 }
 
 impl Default for Settings {
@@ -13,6 +15,7 @@ impl Default for Settings {
         Self {
             phone_model_id: crate::phones::STANDARD_MODEL_ID.to_string(),
             auto_create: true,
+            only_virtual: false,
         }
     }
 }
@@ -29,6 +32,7 @@ pub fn load() -> Settings {
                 match k.trim() {
                     "phone_model" => s.phone_model_id = v.trim().to_string(),
                     "auto_create" => s.auto_create = v.trim() != "0",
+                    "only_virtual" => s.only_virtual = v.trim() != "0",
                     _ => {}
                 }
             }
@@ -39,9 +43,10 @@ pub fn load() -> Settings {
 
 pub fn save(s: &Settings) {
     let text = format!(
-        "phone_model={}\nauto_create={}\n",
+        "phone_model={}\nauto_create={}\nonly_virtual={}\n",
         s.phone_model_id,
-        if s.auto_create { 1 } else { 0 }
+        if s.auto_create { 1 } else { 0 },
+        if s.only_virtual { 1 } else { 0 }
     );
     let _ = std::fs::create_dir_all(crate::log::dir());
     let _ = std::fs::write(path(), text);

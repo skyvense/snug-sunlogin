@@ -18,6 +18,10 @@ pub struct VddState {
     pub created_file: bool,
     /// 建屏时改动虚拟屏缩放前的相对步数（scale.rs）——移除时还原；没改过为 None。
     pub scale_rel_before: Option<i32>,
+    /// 高级模式「仅输出虚拟屏」已把物理屏关掉、还没恢复（ccd.rs 动的手）。
+    /// 断开/退出时据此恢复；万一程序异常退出，下次启动看到它先恢复再说，
+    /// 保证物理屏不会被永久留在关闭状态。
+    pub physical_off: bool,
 }
 
 // MARK: 状态文件（%LOCALAPPDATA%\SnugWindows\vdd-state.txt，简单的 k=v 行）
@@ -36,6 +40,7 @@ pub fn load_state() -> VddState {
                     "added_resolution" => state.added_resolution = v.trim() == "1",
                     "created_file" => state.created_file = v.trim() == "1",
                     "scale_rel_before" => state.scale_rel_before = v.trim().parse().ok(),
+                    "physical_off" => state.physical_off = v.trim() == "1",
                     _ => {}
                 }
             }
@@ -54,6 +59,7 @@ pub fn save_state(state: &VddState) {
     if let Some(rel) = state.scale_rel_before {
         text += &format!("scale_rel_before={rel}\n");
     }
+    text += &format!("physical_off={}\n", if state.physical_off { 1 } else { 0 });
     let _ = std::fs::create_dir_all(crate::log::dir());
     let _ = std::fs::write(state_path(), text);
 }
