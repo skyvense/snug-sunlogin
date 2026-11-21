@@ -10,6 +10,7 @@
 #![windows_subsystem = "windows"]
 
 mod apps;
+mod ccd;
 mod devices;
 mod display;
 mod guide;
@@ -908,6 +909,28 @@ fn cycle_vdd_device() {
     }
 }
 
+/// 拓扑层激活 VDD 路径（ccd 模块）：过程说明逐条记日志；
+/// 返回 true 表示真的应用了激活（调用方再轮询枚举确认效果）。
+fn try_activate_vdd_path() -> bool {
+    match ccd::activate_vdd() {
+        Ok(outcome) => {
+            for note in &outcome.notes {
+                ui_log(&format!("拓扑：{note}"));
+            }
+            if outcome.applied {
+                ui_log("拓扑：已把 VDD 路径激活并存盘");
+            } else if outcome.found && outcome.was_active {
+                ui_log("拓扑：VDD 路径本就是激活的，问题不在这一层");
+            }
+            outcome.applied
+        }
+        Err(e) => {
+            ui_log(&format!("拓扑：{e}"));
+            false
+        }
+    }
+}
+
 /// 对 VDD 设备做一个 pnputil 动作（启用/禁用）并记日志。没找到设备或枚举失败返回 false。
 fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
     match devices::display_adapters() {
@@ -987,12 +1010,22 @@ pub(crate) fn create_phone_screen() {
     }
     // 建屏阶梯：一步没把虚拟屏带起来就上下一步，每步都轮询等它挂上桌面
     // （真机实测约 2 秒，慢的机器更久，别用一次固定等待赌时间）。
-    // 第一级重启设备是老路；但 2026-11-21 真机实证它会失效：向日葵摘屏后、
-    // 乃至干净重启后，pnputil 重启退出码 0、设备 Started、管道在、配置对，
-    // 显示就是不回来。后面两级是后路：nefcon 按硬件 ID 重装节点（参考实现
-    // snug-for-windows 的建屏正路）、禁用→启用完整循环。
-    if !poll_virtual(10) {
-        ui_log("重启设备后虚拟屏没回来，改走 nefcon 重装 VDD 节点…");
+    // 第一级重启设备是老路；2026-11-21 真机定案它失效的原因：向日葵摘屏后
+    // 虚拟屏的显示路径在持久化拓扑里未激活，设备重启退出码 0、设备 Started、
+    // 管道在、配置对，显示就是不回来——第二级拓扑激活专治这一层；
+    // 后面两级是设备层后路：nefcon 按硬件 ID 重装节点、禁用→启用完整循环。
+    let mut up = poll_virtual(10);
+    if !up {
+        // 第二级：拓扑激活——2026-11-21 定案的主要失效模式。向日葵断开会把
+        // 虚拟屏路径摘出活动拓扑并存盘，设备/驱动/配置全正常它也不回来，
+        // 只有把 CCD 路径重新激活才行（ccd.rs）。
+        ui_log("重启设备后虚拟屏没回来，检查显示拓扑…");
+        if try_activate_vdd_path() {
+            up = poll_virtual(10);
+        }
+    }
+    if !up {
+        ui_log("拓扑这级没解决，改走 nefcon 重装 VDD 节点…");
         match devices::nefcon_install() {
             Some((exit, output)) => {
                 ui_log(&format!(
@@ -1012,7 +1045,10 @@ pub(crate) fn create_phone_screen() {
         if !poll_virtual(15) {
             ui_log("nefcon 后仍没虚拟屏，再试禁用→启用循环…");
             cycle_vdd_device();
-            poll_virtual(10);
+            // 设备重现后路径可能仍未激活，再补一次拓扑激活
+            if !poll_virtual(5) && try_activate_vdd_path() {
+                poll_virtual(10);
+            }
         }
     }
     refresh_displays();
@@ -1053,7 +1089,7 @@ pub(crate) fn create_phone_screen() {
             }
         }
         None => {
-            ui_log("建屏三级（重启设备／nefcon 重装／禁用启用循环）都没把虚拟屏带起来：打开设备管理器看 Virtual Display Driver 的状态，把这段日志贴回主会话");
+            ui_log("建屏阶梯（重启设备／拓扑激活／nefcon 重装／禁用启用循环）都没把虚拟屏带起来：打开设备管理器看 Virtual Display Driver 的状态，把这段日志贴回主会话");
         }
     }
 }
