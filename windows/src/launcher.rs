@@ -248,7 +248,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
             font_title: make_font(-54, 700),
             font_name: make_font(-26, 600),
             font_sub: make_font(-22, 400),
-            font_head: make_font(-34, 600),
+            font_head: make_font(-40, 600),
         });
     });
     let class_w = wide(LAUNCHER_CLASS);
@@ -887,23 +887,24 @@ fn content_height(tab: Tab, items: &[Item], width: i32) -> i32 {
 fn tab_rects(width: i32) -> (RECT, RECT, RECT) {
     let mk = |left: i32, right: i32| RECT {
         left,
-        top: 22,
+        top: 18,
         right,
-        bottom: 22 + 52,
+        bottom: 18 + 60,
     };
     (
-        mk(width - 440, width - 292),
-        mk(width - 282, width - 134),
-        mk(width - 116, width - 22),
+        mk(width - 500, width - 332),
+        mk(width - 322, width - 154),
+        mk(width - 136, width - 22),
     )
 }
 
 /// 搜索框在页眉里的位置：绘制侧据此描圆角边框，创建侧据此摆 Edit 控件，两边必须同源。
+/// 宽度封顶 320：搜索只是个入口，拉满整行既不好看也挤占页签的位置。
 fn search_rect(width: i32) -> RECT {
     RECT {
         left: 180,
         top: 27,
-        right: (width - 456).max(180 + 120),
+        right: (width - 516).min(180 + 320).max(180 + 140),
         bottom: 27 + 42,
     }
 }
