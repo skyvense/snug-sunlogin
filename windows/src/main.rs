@@ -1211,20 +1211,15 @@ fn install_advanced_menu(hwnd: HWND) {
         let t1 = display::wide("测试窗口");
         let t2 = display::wide("启动器");
         let t3 = display::wide("连入时仅输出虚拟屏（关闭物理屏）");
-        let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_TEST, Some(PCWSTR(t1.as_ptr())));
-        let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_LAUNCHER, Some(PCWSTR(t2.as_ptr())));
-        let _ = AppendMenuW(sub, MF_SEPARATOR, 0, None);
-        let _ = AppendMenuW(
-            sub,
-            MF_STRING,
-            IDM_ADV_ONLY_VIRTUAL,
-            Some(PCWSTR(t3.as_ptr())),
-        );
+        let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_TEST, PCWSTR(t1.as_ptr()));
+        let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_LAUNCHER, PCWSTR(t2.as_ptr()));
+        let _ = AppendMenuW(sub, MF_SEPARATOR, 0, PCWSTR::null());
+        let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_ONLY_VIRTUAL, PCWSTR(t3.as_ptr()));
         let sys = GetSystemMenu(hwnd, false);
         if !sys.is_invalid() {
             let label = display::wide("高级模式");
-            let _ = AppendMenuW(sys, MF_SEPARATOR, 0, None);
-            let _ = AppendMenuW(sys, MF_POPUP, sub.0 as usize, Some(PCWSTR(label.as_ptr())));
+            let _ = AppendMenuW(sys, MF_SEPARATOR, 0, PCWSTR::null());
+            let _ = AppendMenuW(sys, MF_POPUP, sub.0 as usize, PCWSTR(label.as_ptr()));
         }
         MAIN.with(|c| {
             if let Some(s) = c.borrow_mut().as_mut() {
@@ -1250,7 +1245,7 @@ fn sync_adv_menu_check() {
         let _ = CheckMenuItem(
             menu,
             IDM_ADV_ONLY_VIRTUAL as u32,
-            MF_BYCOMMAND | if on { MF_CHECKED } else { MF_UNCHECKED },
+            (MF_BYCOMMAND | if on { MF_CHECKED } else { MF_UNCHECKED }).0,
         );
     }
 }
