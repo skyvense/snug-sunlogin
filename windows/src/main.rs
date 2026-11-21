@@ -876,6 +876,38 @@ fn restart_vdd_device() -> bool {
     }
 }
 
+/// 轮询等虚拟屏挂上桌面（带消息泵，UI 不冻）。出现返回 true，超时返回 false。
+fn poll_virtual(secs: u64) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if display::list().iter().any(|d| d.is_virtual()) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        wait_pump(500);
+    }
+}
+
+/// 对 VDD 设备做一次禁用→启用完整循环并记日志（建屏阶梯的最后一级）。
+fn cycle_vdd_device() {
+    match devices::display_adapters() {
+        Ok(list) => match devices::find_vdd(&list) {
+            Some(dev) => {
+                ui_log(&format!(
+                    "禁用→启用循环 VDD 设备：{}（{}，状态 {}）",
+                    dev.friendly_name, dev.instance_id, dev.status
+                ));
+                let (exit, _) = devices::cycle_device(&dev.instance_id);
+                ui_log(&format!("循环后启用退出码 {exit}"));
+            }
+            None => ui_log("禁用→启用循环：没找到 VDD 设备，跳过"),
+        },
+        Err(e) => ui_log(&e),
+    }
+}
+
 /// 对 VDD 设备做一个 pnputil 动作（启用/禁用）并记日志。没找到设备或枚举失败返回 false。
 fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
     match devices::display_adapters() {
@@ -953,17 +985,35 @@ pub(crate) fn create_phone_screen() {
     if !restart_vdd_device() {
         return;
     }
-    // 重启后虚拟屏要几秒才挂上桌面（真机实测约 2 秒，慢的机器更久）：
-    // 轮询等它出现，别用一次固定等待赌时间，否则会误报「没枚举到」。
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if display::list().iter().any(|d| d.is_virtual()) {
-            break;
+    // 建屏阶梯：一步没把虚拟屏带起来就上下一步，每步都轮询等它挂上桌面
+    // （真机实测约 2 秒，慢的机器更久，别用一次固定等待赌时间）。
+    // 第一级重启设备是老路；但 2026-11-21 真机实证它会失效：向日葵摘屏后、
+    // 乃至干净重启后，pnputil 重启退出码 0、设备 Started、管道在、配置对，
+    // 显示就是不回来。后面两级是后路：nefcon 按硬件 ID 重装节点（参考实现
+    // snug-for-windows 的建屏正路）、禁用→启用完整循环。
+    if !poll_virtual(10) {
+        ui_log("重启设备后虚拟屏没回来，改走 nefcon 重装 VDD 节点…");
+        match devices::nefcon_install() {
+            Some((exit, output)) => {
+                ui_log(&format!(
+                    "nefcon install 退出码 {exit}（0/3010 均算装上，最终看枚举）"
+                ));
+                if exit != 0 && exit != 3010 {
+                    let tail: Vec<&str> = output.lines().rev().take(3).collect();
+                    for line in tail.iter().rev() {
+                        ui_log(&format!("  {line}"));
+                    }
+                }
+            }
+            None => {
+                ui_log("随包里没找到 nefcon 或 MttVDD.inf，跳过 nefcon 这一步");
+            }
         }
-        if Instant::now() >= deadline {
-            break;
+        if !poll_virtual(15) {
+            ui_log("nefcon 后仍没虚拟屏，再试禁用→启用循环…");
+            cycle_vdd_device();
+            poll_virtual(10);
         }
-        wait_pump(500);
     }
     refresh_displays();
 
@@ -1003,7 +1053,7 @@ pub(crate) fn create_phone_screen() {
             }
         }
         None => {
-            ui_log("重启后仍没枚举到虚拟屏：打开设备管理器看 Virtual Display Driver 的状态，把日志贴回主会话");
+            ui_log("建屏三级（重启设备／nefcon 重装／禁用启用循环）都没把虚拟屏带起来：打开设备管理器看 Virtual Display Driver 的状态，把这段日志贴回主会话");
         }
     }
 }
