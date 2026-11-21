@@ -52,11 +52,14 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 const ID_REFRESH: i32 = 1001;
 const ID_CREATE: i32 = 1002;
 const ID_REMOVE: i32 = 1003;
-const ID_TEST: i32 = 1004;
-const ID_LAUNCHER: i32 = 1006;
 const ID_MODEL: i32 = 1007;
 const ID_MODE_AUTO: i32 = 1008;
 const ID_MODE_MANUAL: i32 = 1009;
+/// 左上角图标菜单（系统菜单）里「高级模式」子菜单的命令 ID，走 WM_SYSCOMMAND。
+/// 系统命令占 0xF000 段且低 4 位保留，自定义 ID 放低位、比较时按 & 0xFFF0 掩码。
+const IDM_ADV_TEST: usize = 0x0110;
+const IDM_ADV_LAUNCHER: usize = 0x0120;
+const IDM_ADV_ONLY_VIRTUAL: usize = 0x0130;
 /// 启动驱动检测的结果（wparam 1 = 驱动在，0 = 不在 → 直接开向导）
 const WM_DRIVER_CHECKED: u32 = WM_APP + 30;
 
@@ -84,26 +87,28 @@ struct MainState {
     btn_refresh: HWND,
     btn_create: HWND,
     btn_remove: HWND,
-    btn_test: HWND,
-    btn_launcher: HWND,
 
     icon_box: HWND,
     detail: HWND,
     lbl_phone: HWND,
-    lbl_test: HWND,
-    /// 两张内容卡片的矩形（x, y, w, h），layout 时写入，WM_PAINT 据此画白卡片
+    /// 内容卡片的矩形（x, y, w, h），layout 时写入，WM_PAINT 据此画白卡片
     card_phone: (i32, i32, i32, i32),
-    card_test: (i32, i32, i32, i32),
     combo_model: HWND,
     radio_auto: HWND,
     radio_manual: HWND,
     model_label: HWND,
     phone_model_id: String,
     auto_create: bool,
+    /// 高级模式：主控连入时仅输出虚拟屏（物理屏关掉，断开恢复）。
+    only_virtual: bool,
+    /// 物理屏当前是被本应用关掉的（与 vdd-state 的 physical_off 同步：
+    /// 内存这份防状态文件被别的流程清掉后丢标记，文件那份管异常退出后的下次启动）。
+    physical_off: bool,
+    /// 「高级模式」子菜单句柄（更新勾选状态用）
+    adv_menu: HMENU,
     /// 当前这块屏是自动建的（主控断开时只拆自动建的，手动建的不碰）。
     screen_auto_owned: bool,
     phone_hint: HWND,
-    test_hint: HWND,
     log_edit: HWND,
     log_text: String,
     displays: Vec<DisplayInfo>,
@@ -426,8 +431,8 @@ fn move_ctrl(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
 }
 
 /// 按当前客户区大小排一遍控件，构图学 Mac 版设置页：
-/// 顶部状态区（图标 + 标题 + 说明）→ 显示器列表 → 功能分组（「手机屏」整组在上，
-/// 「测试」「驱动」并排在下，组内带一行短说明）→ 日志吃掉剩余高度。
+/// 顶部状态区（图标 + 标题 + 说明）→ 显示器列表 → 「手机屏」卡片 → 日志吃掉剩余高度。
+/// （测试入口已挪进左上角图标菜单的「高级模式」，日志因此更高。）
 /// 坐标先按 96 DPI 的设计值写，再乘窗口 DPI 缩放，高分屏上比例不变。
 fn layout_controls(client_w: i32, client_h: i32) {
     let items = MAIN.with(|c| {
@@ -446,10 +451,6 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.radio_auto,
                 s.radio_manual,
                 s.phone_hint,
-                s.lbl_test,
-                s.btn_test,
-                s.btn_launcher,
-                s.test_hint,
                 s.btn_refresh,
                 s.log_edit,
                 s.dpi,
@@ -470,10 +471,6 @@ fn layout_controls(client_w: i32, client_h: i32) {
         radio_auto,
         radio_manual,
         phone_hint,
-        lbl_test,
-        b_test,
-        b_launcher,
-        test_hint,
         b_refresh,
         log_edit,
         dpi,
@@ -543,30 +540,14 @@ fn layout_controls(client_w: i32, client_h: i32) {
         sc(22),
     );
     move_ctrl(phone_hint, m + sc(14), gy + sc(102), inner, sc(18));
-    // 「测试」卡片：整宽
-    let gh = sc(108);
-    let ry = gy + gh_phone + sc(12);
-    let inner2 = cw - sc(28);
-    let bw = (inner2 - sc(8)) / 2;
-    move_ctrl(lbl_test, m + sc(14), ry + sc(10), sc(200), sc(20));
-    move_ctrl(b_test, m + sc(14), ry + sc(40), bw, sc(36));
-    move_ctrl(
-        b_launcher,
-        m + sc(14) + bw + sc(8),
-        ry + sc(40),
-        inner2 - bw - sc(8),
-        sc(36),
-    );
-    move_ctrl(test_hint, m + sc(14), ry + sc(84), inner2, sc(18));
     // 卡片矩形存回状态，WM_PAINT 照此画白卡片
     MAIN.with(|c| {
         if let Some(s) = c.borrow_mut().as_mut() {
             s.card_phone = (m, gy, cw, gh_phone);
-            s.card_test = (m, ry, cw, gh);
         }
     });
-    // 日志吃掉剩余高度
-    let log_y = ry + gh + sc(12);
+    // 日志吃掉剩余高度（测试卡片挪进菜单后，这里比原来高出一整张卡）
+    let log_y = gy + gh_phone + sc(12);
     move_ctrl(log_edit, m, log_y, cw, client_h - log_y - m);
 }
 
@@ -1214,9 +1195,160 @@ fn persist_settings() {
             settings::save(&settings::Settings {
                 phone_model_id: s.phone_model_id.clone(),
                 auto_create: s.auto_create,
+                only_virtual: s.only_virtual,
             });
         }
     });
+}
+
+/// 左上角图标菜单（系统菜单）加「高级模式」子菜单：两个测试入口 +「仅输出虚拟屏」勾选项。
+/// 系统菜单就是点标题栏左上角图标（或右击标题栏、任务栏图标）弹出的那个菜单。
+fn install_advanced_menu(hwnd: HWND) {
+    unsafe {
+        let Ok(sub) = CreatePopupMenu() else {
+            return;
+        };
+        let t1 = display::wide("测试窗口");
+        let t2 = display::wide("启动器");
+        let t3 = display::wide("连入时仅输出虚拟屏（关闭物理屏）");
+        let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_TEST, Some(PCWSTR(t1.as_ptr())));
+        let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_LAUNCHER, Some(PCWSTR(t2.as_ptr())));
+        let _ = AppendMenuW(sub, MF_SEPARATOR, 0, None);
+        let _ = AppendMenuW(
+            sub,
+            MF_STRING,
+            IDM_ADV_ONLY_VIRTUAL,
+            Some(PCWSTR(t3.as_ptr())),
+        );
+        let sys = GetSystemMenu(hwnd, false);
+        if !sys.is_invalid() {
+            let label = display::wide("高级模式");
+            let _ = AppendMenuW(sys, MF_SEPARATOR, 0, None);
+            let _ = AppendMenuW(sys, MF_POPUP, sub.0 as usize, Some(PCWSTR(label.as_ptr())));
+        }
+        MAIN.with(|c| {
+            if let Some(s) = c.borrow_mut().as_mut() {
+                s.adv_menu = sub;
+            }
+        });
+    }
+    sync_adv_menu_check();
+}
+
+/// 把「仅输出虚拟屏」的勾选状态同步到菜单（安装菜单/设置变更后调用）。
+fn sync_adv_menu_check() {
+    let (menu, on) = MAIN.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|s| (s.adv_menu, s.only_virtual))
+            .unwrap_or_default()
+    });
+    if menu.is_invalid() {
+        return;
+    }
+    unsafe {
+        let _ = CheckMenuItem(
+            menu,
+            IDM_ADV_ONLY_VIRTUAL as u32,
+            MF_BYCOMMAND | if on { MF_CHECKED } else { MF_UNCHECKED },
+        );
+    }
+}
+
+/// 菜单里勾/取消「连入时仅输出虚拟屏」：存设置，并当场生效——
+/// 正连着且虚拟屏在就立刻关物理屏；取消时物理屏正关着就立刻恢复。
+fn toggle_only_virtual() {
+    let on = MAIN.with(|c| {
+        if let Some(s) = c.borrow_mut().as_mut() {
+            s.only_virtual = !s.only_virtual;
+            s.only_virtual
+        } else {
+            false
+        }
+    });
+    persist_settings();
+    sync_adv_menu_check();
+    if on {
+        ui_log("高级模式：连入时仅输出虚拟屏 = 开（主控连入后关掉物理屏，断开自动恢复）");
+        if session::AGENT_PRESENT.load(Ordering::Relaxed)
+            && display::list().iter().any(|d| d.is_virtual())
+        {
+            turn_off_physicals("菜单开启且主控正连着");
+        }
+    } else {
+        ui_log("高级模式：连入时仅输出虚拟屏 = 关");
+        restore_physicals_if_off("菜单关闭");
+    }
+}
+
+/// 关掉物理屏只留虚拟屏（ccd.rs 动手，这里管标记与日志）。已关着不重复动。
+fn turn_off_physicals(reason: &str) {
+    let already = MAIN.with(|c| {
+        c.borrow().as_ref().map(|s| s.physical_off).unwrap_or(false)
+    }) || vdd::load_state().physical_off;
+    if already {
+        return;
+    }
+    ui_log(&format!("仅输出虚拟屏（{reason}）：正在关闭物理屏…"));
+    match ccd::disable_physicals() {
+        Ok(out) => {
+            for n in &out.notes {
+                ui_log(&format!("拓扑：{n}"));
+            }
+            if out.applied {
+                let mut st = vdd::load_state();
+                st.physical_off = true;
+                vdd::save_state(&st);
+                MAIN.with(|c| {
+                    if let Some(s) = c.borrow_mut().as_mut() {
+                        s.physical_off = true;
+                    }
+                });
+                ui_log("物理屏已关闭，现在只输出虚拟屏（断开后自动恢复）");
+            } else if out.changed == 0 {
+                ui_log("没有可关的物理屏（本来就只剩虚拟屏？），保持现状");
+            } else {
+                ui_log("⚠ 关物理屏没成功，物理屏保持原样（详见上面拓扑日志）");
+            }
+        }
+        Err(e) => ui_log(&format!("⚠ 关物理屏失败：{e}（物理屏保持原样）")),
+    }
+}
+
+/// 物理屏若是被本应用关掉的就恢复它（断开/退出/启动自检/关开关时调用）。
+/// 恢复没验成就不清标记：宁可下次启动再试，也不能把「还关着」这件事忘了；
+/// 而且关屏时没存盘，重启机器物理屏必回来，这是最后一道保险。
+fn restore_physicals_if_off(reason: &str) {
+    let off = MAIN.with(|c| {
+        c.borrow().as_ref().map(|s| s.physical_off).unwrap_or(false)
+    }) || vdd::load_state().physical_off;
+    if !off {
+        return;
+    }
+    ui_log(&format!("恢复物理屏（{reason}）…"));
+    match ccd::restore_physicals() {
+        Ok(out) => {
+            for n in &out.notes {
+                ui_log(&format!("拓扑：{n}"));
+            }
+            if out.applied || out.changed == 0 {
+                let mut st = vdd::load_state();
+                st.physical_off = false;
+                vdd::save_state(&st);
+                MAIN.with(|c| {
+                    if let Some(s) = c.borrow_mut().as_mut() {
+                        s.physical_off = false;
+                    }
+                });
+                ui_log("物理屏已恢复");
+            } else {
+                ui_log("⚠ 物理屏恢复未通过复查，标记保留（下次启动会再试；也可重启机器，关屏时未存盘、重启必恢复）");
+            }
+        }
+        Err(e) => ui_log(&format!(
+            "⚠ 物理屏恢复失败：{e}（标记保留，下次启动再试；重启机器也可恢复）"
+        )),
+    }
 }
 
 /// 换型号：屏在用时先按旧规格拆干净（配置手术认的是当前规格），再换规格重建。
@@ -1643,54 +1775,6 @@ unsafe extern "system" fn main_wnd_proc(
                     None,
                 );
             }
-            let lbl_test = mk_control(
-                hwnd,
-                "Static",
-                "测试",
-                base,
-                0,
-                0,
-                10,
-                10,
-                9012,
-                grp_font,
-            );
-            let btn_test = mk_control(
-                hwnd,
-                "Button",
-                "测试窗口",
-                btn_style,
-                0,
-                0,
-                10,
-                10,
-                ID_TEST,
-                ui_font,
-            );
-            let btn_launcher = mk_control(
-                hwnd,
-                "Button",
-                "启动器",
-                btn_style,
-                0,
-                0,
-                10,
-                10,
-                ID_LAUNCHER,
-                ui_font,
-            );
-            let test_hint = mk_control(
-                hwnd,
-                "Static",
-                "在虚拟屏上看串流、开 App 资源库",
-                base,
-                0,
-                0,
-                10,
-                10,
-                9013,
-                ui_font,
-            );
             let btn_refresh = mk_control(
                 hwnd,
                 "Button",
@@ -1744,23 +1828,21 @@ unsafe extern "system" fn main_wnd_proc(
                     btn_refresh,
                     btn_create,
                     btn_remove,
-                    btn_test,
-                    btn_launcher,
                     icon_box,
                     detail,
                     lbl_phone,
-                    lbl_test,
                     card_phone: (0, 0, 0, 0),
-                    card_test: (0, 0, 0, 0),
                     combo_model,
                     radio_auto,
                     radio_manual,
                     model_label,
                     phone_model_id: model.id.clone(),
                     auto_create: saved.auto_create,
+                    only_virtual: saved.only_virtual,
+                    physical_off: vdd::load_state().physical_off,
+                    adv_menu: HMENU::default(),
                     screen_auto_owned: false,
                     phone_hint,
-                    test_hint,
                     log_edit,
                     log_text: String::new(),
                     displays: Vec::new(),
@@ -1790,6 +1872,17 @@ unsafe extern "system" fn main_wnd_proc(
             } else {
                 "自动建屏：关"
             });
+            install_advanced_menu(hwnd);
+            ui_log(if saved.only_virtual {
+                "高级模式：连入时仅输出虚拟屏（在左上角图标菜单的「高级模式」里可关）"
+            } else {
+                "高级模式：关（左上角图标菜单的「高级模式」里可开「连入时仅输出虚拟屏」）"
+            });
+            // 异常退出兜底：上次把物理屏关了没恢复（标记还在），先恢复再干别的
+            if vdd::load_state().physical_off {
+                ui_log("检测到上次物理屏未恢复（程序可能异常退出），立即恢复…");
+                restore_physicals_if_off("启动自检");
+            }
             session::spawn(hwnd.0 as usize);
             // 启动后静默查一次新版：没有就不打扰，有才弹窗问
             update::spawn_check(hwnd.0 as usize, false);
@@ -1823,17 +1916,17 @@ unsafe extern "system" fn main_wnd_proc(
             let mmi = lparam.0 as *mut MINMAXINFO;
             unsafe {
                 (*mmi).ptMinTrackSize.x = 600 * dpi / 96;
-                (*mmi).ptMinTrackSize.y = 620 * dpi / 96;
+                (*mmi).ptMinTrackSize.y = 560 * dpi / 96;
             }
             LRESULT(0)
         }
         WM_PAINT => {
-            // 现代主题的底：整幅刷浅灰，再把两张内容卡片画成白底圆角描边
-            let (cp, ct) = MAIN.with(|c| {
+            // 现代主题的底：整幅刷浅灰，再把内容卡片画成白底圆角描边
+            let cp = MAIN.with(|c| {
                 c.borrow()
                     .as_ref()
-                    .map(|s| (s.card_phone, s.card_test))
-                    .unwrap_or(((0, 0, 0, 0), (0, 0, 0, 0)))
+                    .map(|s| s.card_phone)
+                    .unwrap_or((0, 0, 0, 0))
             });
             unsafe {
                 let mut ps = PAINTSTRUCT::default();
@@ -1841,7 +1934,7 @@ unsafe extern "system" fn main_wnd_proc(
                 let mut rc = windows::Win32::Foundation::RECT::default();
                 let _ = GetClientRect(hwnd, &mut rc);
                 FillRect(hdc, &rc, bg_brush());
-                for (x, y, w, h) in [cp, ct] {
+                for (x, y, w, h) in [cp] {
                     if w > 0 && h > 0 {
                         let brush = CreateSolidBrush(theme_card());
                         let pen = CreatePen(PS_SOLID, 1, rgb(226, 226, 231));
@@ -1869,6 +1962,18 @@ unsafe extern "system" fn main_wnd_proc(
             // 组名与标签深色；底刷按所在区域给（顶区用底色刷、卡片内用白刷），不再发灰。
             let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
             let ctrl = HWND(lparam.0 as *mut core::ffi::c_void);
+            // 只读 Edit（日志框）的配色也走这条消息而不是 WM_CTLCOLOREDIT
+            // （Win32 惯例），先单独处理：白底深字、不透明底色把字底刷实
+            let is_log = MAIN.with(|c| {
+                c.borrow().as_ref().map(|s| s.log_edit == ctrl).unwrap_or(false)
+            });
+            if is_log {
+                unsafe {
+                    SetTextColor(hdc, rgb(29, 29, 31));
+                    SetBkColor(hdc, theme_card());
+                }
+                return LRESULT(card_brush().0 as isize);
+            }
             // kind：0 无关、1 状态标题、2 次灰、3 深色
             let (kind, level, on_card) = MAIN.with(|c| {
                 let cell = c.borrow();
@@ -1878,12 +1983,9 @@ unsafe extern "system" fn main_wnd_proc(
                             (1, s.status_level, false)
                         } else if s.detail == ctrl {
                             (2, s.status_level, false)
-                        } else if s.phone_hint == ctrl || s.test_hint == ctrl {
+                        } else if s.phone_hint == ctrl {
                             (2, s.status_level, true)
-                        } else if s.lbl_phone == ctrl
-                            || s.lbl_test == ctrl
-                            || s.model_label == ctrl
-                        {
+                        } else if s.lbl_phone == ctrl || s.model_label == ctrl {
                             (3, s.status_level, true)
                         } else {
                             (0, s.status_level, false)
@@ -1912,11 +2014,14 @@ unsafe extern "system" fn main_wnd_proc(
             })
         }
         WM_CTLCOLORBTN => {
-            // 单选钮（自绘按钮不走这里）：深色字、白底，与卡片融为一体
+            // 单选钮（自绘按钮不走这里）：深色字、白底，与卡片融为一体。
+            // 不能用 TRANSPARENT：字底会透出父窗口的页底灰（#F5F5F7），
+            // 看起来就是「单选钮底色发灰」（2026-11-21 机主实报）；改不透明，
+            // 字底用卡片白刷实，才真正贴在白卡片上。
             let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
             unsafe {
                 SetTextColor(hdc, rgb(29, 29, 31));
-                SetBkMode(hdc, TRANSPARENT);
+                SetBkColor(hdc, theme_card());
             }
             LRESULT(card_brush().0 as isize)
         }
@@ -1974,10 +2079,25 @@ unsafe extern "system" fn main_wnd_proc(
             } else {
                 refresh_displays();
             }
+            // 高级模式：虚拟屏在场就把物理屏关掉，只输出虚拟屏（手动模式下
+            // 会话开始不建屏，但屏若已手动建好同样生效）；断开时在 END 里恢复
+            let only_virtual = MAIN.with(|c| {
+                c.borrow().as_ref().map(|s| s.only_virtual).unwrap_or(false)
+            });
+            if only_virtual {
+                if display::list().iter().any(|d| d.is_virtual()) {
+                    turn_off_physicals("主控连入");
+                } else {
+                    ui_log("仅输出虚拟屏：虚拟屏未就绪，暂不关物理屏");
+                }
+            }
             LRESULT(0)
         }
         session::WM_SESSION_END => {
             ui_log("向日葵主控已断开（desktopagent 进程已退出）");
+            // 物理屏恢复放在最前面且不设条件：只要是本应用关的就先恢复，
+            // 后面的拆屏/还原流程再出什么问题也不能把用户留在无物理屏状态
+            restore_physicals_if_off("主控断开");
             // 虚拟屏在不在用新鲜枚举判：状态里的那份是上次刷新留下的缓存，
             // 拿它决定拆不拆，缓存一旧就会拆漏
             let has_virtual = display::list().iter().any(|d| d.is_virtual());
@@ -2071,6 +2191,24 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
+        WM_SYSCOMMAND => {
+            // 左上角图标菜单里「高级模式」的自定义项在这里处理，其余（关闭/移动等）走默认
+            match wparam.0 & 0xFFF0 {
+                IDM_ADV_TEST => {
+                    toggle_test_window();
+                    LRESULT(0)
+                }
+                IDM_ADV_LAUNCHER => {
+                    toggle_launcher();
+                    LRESULT(0)
+                }
+                IDM_ADV_ONLY_VIRTUAL => {
+                    toggle_only_virtual();
+                    LRESULT(0)
+                }
+                _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+            }
+        }
         WM_COMMAND => {
             let id = (wparam.0 as u32 & 0xffff) as i32;
             let notify = (wparam.0 as u32 >> 16) as u32;
@@ -2085,8 +2223,6 @@ unsafe extern "system" fn main_wnd_proc(
                     restore_session_windows();
                     remove_phone_screen();
                 }
-                ID_TEST => toggle_test_window(),
-                ID_LAUNCHER => toggle_launcher(),
                 ID_MODEL if notify == 1 => on_model_changed(), // 1 = CBN_SELCHANGE
                 ID_MODE_AUTO => {
                     apply_auto_setting(true);
@@ -2101,6 +2237,8 @@ unsafe extern "system" fn main_wnd_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
+            // 退出前同样兜底：物理屏关着就先恢复（正常断开时 END 已恢复，这里是保险）
+            restore_physicals_if_off("程序退出");
             testwin::close();
             launcher::close_all();
             unsafe {
