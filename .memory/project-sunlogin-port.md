@@ -118,3 +118,16 @@ metadata:
 - Release run 44754225493 成功；资产：DMG + .sha256 + .pack + update.json + Snug-Sunlogin-Windows-2.6.4.zip + .zip.sha256。
 - Windows zip 已实际下载校验：sha256 对得上；包内 exe/脚本/README 之外带 nefcon\nefconc.exe 与 vdd\ 四件套——随包驱动正式随版落地。
 - 注意版本线：启动器真源列表/最近使用/窗口尺寸恢复三项在标签之后，只进 2.6.5。
+
+### 2026-11-21 awesun-cli 远程实测（NateThinkbook，本实例经 CLI 全程操作）
+- 通道全通：desktop 截图/点击/拖拽/打字、UAC 同意、锁屏 PIN 解锁、cmd exec（会话偶发掉线，rcmd.sh 连+跑同链+重试可绕；大输出会堵通道）、file 上传（--remote 传目录不是文件路径！）/下载（Snug 占用中的日志下载失败，用 PS Get-Content -Tail 读）。
+- 新构建（CI run 44756821400 产物，含启动器真源+窗口恢复）装到 C:\Users\skyve\SnugTest\ 运行验证：标题 v2.6.4、现代化 UI、手动按钮行、驱动检测、设置持久化（Fold8 外屏）均正常。旧构建在 OneDrive\Desktop\SnugWindows.exe（615424 字节）未动。注意：应用内日志横幅仍印 v0.1.0（写死字符串）；失败提示仍写「点安装 VDD 排查」但新界面已无此按钮——两处文案待修。
+- 旧构建 11:21:58 被本实例 CLI 连入触发完整自动建屏（1080×1706）+开资源库，U6 核心链路实证。新构建启动器日志：运行中 9 窗口、全部 247 个 App（AppsFolder 合并生效）、最近使用 0 个——Recent 文件夹里全是文件快捷方式（mp4/zip/log），无 App 启动记录；真「最近使用 App」需改读 UserAssist 注册表。
+- **建屏回归（重要）**：11:46 本实例断开 desktop 会话后，向日葵在会话结束时把虚拟屏从显示拓扑摘除（VDD 设备与 VDD by MTT 监视器仍 OK，但无活动显示路径；主屏同时被向日葵改回、控制台被重新锁定）。此后新构建自动建屏 ×3 + 手动移除（禁用设备）→建屏 ×1 全部失败：设备启用/重启 pnputil 均退出 0，15 秒轮询枚举不到虚拟屏。11:21 那次成功在此事件之前。待验证：重启机器后是否恢复；或改建屏实现（MTT 管道挂载／监视器设备循环）。连带结论：断开时屏幕可能已被向日葵摘掉，Snug 的自动拆屏/窗口恢复（以 has_virtual 为门）赶不上——11:46 的 END 日志为「自动=是/自动建=否/虚拟屏在=否」未执行恢复；窗口被 Windows 自动挪回主屏，未丢失。
+- 会话边沿特性：CLI 快速断开+重连（3 秒）不产生 END/START（宿主 agent 有宽限期，合并为一段）；断开约 10 秒后 Snug 检出 END。
+
+## 2026-11-21 午间：重启后重跑完整测试（Zhang 拍板「重启 ThinkBook，我重跑完整测试」）
+- 本实例经 CLI cmd 会话下发 shutdown /r 重启 NateThinkbook（12:22），设备掉线后约 1 分钟回在线；desktop 会话重连未再要访问密码；锁屏 PIN 由 Zhang 在聊天中再次提供（只用未存），上滑→点 PIN 框→输 PIN→回车解锁成功（第一次输 PIN 未点框焦点，回锁屏；第二次成功）。
+- **重启未修复建屏（假设证伪）**：解锁后经 cmd 启动 SnugTest 新构建，UAC 点 Yes，12:33:19 启动（Fold8 外屏 1080×1706，自动模式开）。12:33:21 检出 desktopagent（会话在本实例连入中）触发自动建屏：配置已有 1080×1706、写盘 OK → 启用 VDD 设备 pnputil 退出 50（already enabled）→ 重启设备退出 0 → 15 秒轮询仍只枚举到 1 块屏（DISPLAY1 Intel Arc 1920×1080@60），12:33:48 报「重启后仍没枚举到虚拟屏／虚拟屏没就绪，资源库暂不打开」。与 11:46 后失败签名完全一致，干净重启不恢复。
+- 现场取证（失败后）：vdd_settings.xml 中 count=1、1080×1706 在列；Display 类 ROOT\DISPLAY\0001（Virtual Display Driver，oem274.inf）状态 Started，即 Snug 重启的正是它；另有 ROOT\MTTVDD\0000 残留节点 Stopped 且无绑定驱动（首版脚本 SetupAPI 建的半成品，无害）；命名管道 \\.\pipe\MTTVirtualDisplayPipe 存在——驱动进程活着。结论：设备/驱动/管道/配置均正常，唯独重启设备不再产生显示路径；下一步改建屏实现（优先试管道命令挂载，参考 rizetngan 实现的 VddDriverClient；或监视器设备循环/CCD 挂载），不要再让用户反复重启。
+- 因建屏失败，后续步骤（Explorer 移入虚拟屏→断开验窗口恢复/自动拆屏）无屏可测，本轮未跑。机器现状：Snug 新构建在跑、自动模式、虚拟屏未建；本实例 desktop 会话已断开（控制台按宿主惯例回锁）。
