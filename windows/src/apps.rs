@@ -842,9 +842,15 @@ pub fn usage_map() -> HashMap<String, UsageInfo> {
     map
 }
 
-/// 查一个 App 的使用记录：完整 exe 路径 → AUMID → exe 主干 → 名字，逐个试。
+/// 查一个 App 的使用记录：快捷方式路径 → 完整 exe 路径 → AUMID → exe 主干
+/// → 名字，逐个试。快捷方式优先：UserAssist 的 {F4E57C4B} 组按 .lnk 记账，
+/// 先认它，指向同一个 exe 的一堆快捷方式（各种 VS 命令行提示符都指
+/// cmd.exe）才不会人人顶着 exe 的总次数挤在榜首。
 pub fn usage_of(map: &HashMap<String, UsageInfo>, a: &InstalledApp) -> UsageInfo {
     let mut candidates: Vec<String> = Vec::new();
+    if !a.lnk_path.is_empty() {
+        candidates.push(format!("raw:{}", a.lnk_path.to_lowercase()));
+    }
     if !a.exe_path.is_empty() {
         candidates.push(format!("raw:{}", a.exe_path.to_lowercase()));
     }
