@@ -132,10 +132,60 @@ pub fn restart_device(instance_id: &str) -> (i32, String) {
     if exit == 0 {
         return (exit, output);
     }
+    cycle_device(instance_id)
+}
+
+/// 禁用→停顿→启用，强制设备完整走一遍拆除/重建。
+/// pnputil /restart-device 对 UMDF 设备可能只是表面成功（退出码 0 但驱动没重走
+/// AddDevice，显示带不回来——2026-11-21 真机实证），这条路是显式的完整循环。
+/// 返回最后一步（启用）的 (退出码, 输出)。
+pub fn cycle_device(instance_id: &str) -> (i32, String) {
     let (disable_exit, disable_output) = run("pnputil.exe", &["/disable-device", instance_id]);
     if disable_exit != 0 {
         return (disable_exit, disable_output);
     }
-    std::thread::sleep(std::time::Duration::from_millis(1200));
+    std::thread::sleep(std::time::Duration::from_millis(1500));
     run("pnputil.exe", &["/enable-device", instance_id])
+}
+
+/// 随包 nefcon 与 VDD INF 的位置：发布包里 nefcon\nefconc.exe、vdd\MttVDD.inf 与 exe
+/// 同级；INF 也可能在 C:\VirtualDisplayDriver（搞通脚本把驱动三件套放在那）。
+/// 找不到返回 None（调用方如实记日志跳过，不静默）。
+fn nefcon_paths() -> Option<(String, String)> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let nefcon = exe_dir.join("nefcon").join("nefconc.exe");
+    let nefcon = if nefcon.exists() {
+        nefcon
+    } else {
+        exe_dir.join("nefconc.exe")
+    };
+    if !nefcon.exists() {
+        return None;
+    }
+    let inf_bundled = exe_dir.join("vdd").join("MttVDD.inf");
+    let inf = if inf_bundled.exists() {
+        inf_bundled
+    } else {
+        std::path::PathBuf::from(r"C:\VirtualDisplayDriver\MttVDD.inf")
+    };
+    if !inf.exists() {
+        return None;
+    }
+    Some((
+        nefcon.to_string_lossy().into_owned(),
+        inf.to_string_lossy().into_owned(),
+    ))
+}
+
+/// 用 nefcon 按硬件 ID 重装 VDD 节点。参考实现（snug-for-windows）的会话建屏就是
+/// 这条路——它的 StartDisplay 跑 `nefcon install <inf> Root\MttVDD --no-duplicates`
+/// 现建节点，而不是重启既有设备；这台机器上 VDD 安装最终也是 nefcon install 收的尾。
+/// 退出码 0 = 成功，3010 = 成功但建议重启；成败最终以调用方轮询枚举结果为准。
+/// 随包文件不齐返回 None。
+pub fn nefcon_install() -> Option<(i32, String)> {
+    let (nefcon, inf) = nefcon_paths()?;
+    Some(run(
+        &nefcon,
+        &["install", &inf, r"Root\MttVDD", "--no-duplicates"],
+    ))
 }
