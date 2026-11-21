@@ -23,8 +23,8 @@ const HOME_CLASS: &str = "SnugSunloginHomeBtn";
 const ID_SEARCH: i32 = 3101;
 const EN_CHANGE: u32 = 0x0300;
 
-const TOP_H: i32 = 64;
-const CONTENT_TOP: i32 = 76;
+const TOP_H: i32 = 96;
+const CONTENT_TOP: i32 = 112;
 const ROW_H: i32 = 88;
 const TILE_H: i32 = 188;
 const TILE_MIN_W: i32 = 172;
@@ -94,6 +94,8 @@ struct LauncherState {
     font_title: HFONT,
     font_name: HFONT,
     font_sub: HFONT,
+    /// 页眉专用：页签与关闭钮的字（比列表名大一号，配放大后的页眉）。
+    font_head: HFONT,
 }
 
 struct HomeState {
@@ -243,9 +245,10 @@ pub fn open(rect: RECT) -> Result<(), String> {
             rect,
             expanded: HashSet::new(),
             icons: HashMap::new(),
-            font_title: make_font(-38, 700),
+            font_title: make_font(-54, 700),
             font_name: make_font(-26, 600),
             font_sub: make_font(-22, 400),
+            font_head: make_font(-34, 600),
         });
     });
     let class_w = wide(LAUNCHER_CLASS);
@@ -283,6 +286,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
                         let _ = DeleteObject(HGDIOBJ(s.font_title.0));
                         let _ = DeleteObject(HGDIOBJ(s.font_name.0));
                         let _ = DeleteObject(HGDIOBJ(s.font_sub.0));
+                        let _ = DeleteObject(HGDIOBJ(s.font_head.0));
                     }
                 }
             });
@@ -883,15 +887,25 @@ fn content_height(tab: Tab, items: &[Item], width: i32) -> i32 {
 fn tab_rects(width: i32) -> (RECT, RECT, RECT) {
     let mk = |left: i32, right: i32| RECT {
         left,
-        top: 13,
+        top: 22,
         right,
-        bottom: 13 + 38,
+        bottom: 22 + 52,
     };
     (
-        mk(width - 348, width - 236),
-        mk(width - 228, width - 116),
-        mk(width - 108, width - 16),
+        mk(width - 440, width - 292),
+        mk(width - 282, width - 134),
+        mk(width - 116, width - 22),
     )
+}
+
+/// 搜索框在页眉里的位置：绘制侧据此描圆角边框，创建侧据此摆 Edit 控件，两边必须同源。
+fn search_rect(width: i32) -> RECT {
+    RECT {
+        left: 180,
+        top: 27,
+        right: (width - 456).max(180 + 120),
+        bottom: 27 + 42,
+    }
 }
 
 /// 图标缓存（按路径），在状态里；取不到返回 None，绘制侧画占位。
@@ -1112,13 +1126,14 @@ fn paint(hwnd: HWND) {
                 s.font_title,
                 s.font_name,
                 s.font_sub,
+                s.font_head,
             )
         })
     });
     unsafe {
         let mut ps = PAINTSTRUCT::default();
         let hdc = BeginPaint(hwnd, &mut ps);
-        let Some((items, tab, scroll, font_title, font_name, font_sub)) = snap else {
+        let Some((items, tab, scroll, font_title, font_name, font_sub, font_head)) = snap else {
             let _ = EndPaint(hwnd, &ps);
             return;
         };
@@ -1133,18 +1148,52 @@ fn paint(hwnd: HWND) {
             FillRect(mem, &rc, bg);
             let _ = DeleteObject(HGDIOBJ(bg.0));
 
+            // 页眉底色：白带 + 底边分隔线，和内容区的浅灰拉开层次
+            let band = CreateSolidBrush(rgb(255, 255, 255));
+            let band_rc = RECT {
+                left: 0,
+                top: 0,
+                right: w,
+                bottom: TOP_H,
+            };
+            FillRect(mem, &band_rc, band);
+            let _ = DeleteObject(HGDIOBJ(band.0));
+            let div = CreateSolidBrush(rgb(226, 226, 232));
+            let div_rc = RECT {
+                left: 0,
+                top: TOP_H - 1,
+                right: w,
+                bottom: TOP_H,
+            };
+            FillRect(mem, &div_rc, div);
+            let _ = DeleteObject(HGDIOBJ(div.0));
             // 页眉：标题 + 分页 + 关闭
             SetBkMode(mem, TRANSPARENT);
             SetTextColor(mem, rgb(30, 30, 34));
             let old_font = SelectObject(mem, HGDIOBJ(font_title.0));
             let mut tr = RECT {
-                left: 20,
-                top: 8,
-                right: 110,
+                left: 26,
+                top: 0,
+                right: 172,
                 bottom: TOP_H,
             };
             draw_text(mem, "App", &mut tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            SelectObject(mem, HGDIOBJ(font_name.0));
+            // 搜索框的圆角描边：Edit 本体不带边框，框由这里描，位置与创建时同源（search_rect）
+            let sr = search_rect(w);
+            let frame = RECT {
+                left: sr.left - 8,
+                top: sr.top - 6,
+                right: sr.right + 8,
+                bottom: sr.bottom + 6,
+            };
+            let pen = CreatePen(PS_SOLID, 2, rgb(204, 204, 212));
+            let op2 = SelectObject(mem, HGDIOBJ(pen.0));
+            let ob2 = SelectObject(mem, GetStockObject(NULL_BRUSH));
+            let _ = RoundRect(mem, frame.left, frame.top, frame.right, frame.bottom, 26, 26);
+            SelectObject(mem, ob2);
+            SelectObject(mem, op2);
+            let _ = DeleteObject(HGDIOBJ(pen.0));
+            SelectObject(mem, HGDIOBJ(font_head.0));
             let (run_rc, all_rc, close_rc) = tab_rects(w);
             // 页眉按钮组：两页签做成胶囊分段控件（浅灰轨道 + 品牌金橙滑块），
             // 关闭做成珊瑚色圆钮配白 ✕，和运行圆点同一色系
@@ -1376,16 +1425,18 @@ unsafe extern "system" fn launcher_proc(
             });
             let w = rect.right - rect.left;
             let class_w = wide("Edit");
+            let sr = search_rect(w);
             let search = unsafe {
                 CreateWindowExW(
                     WINDOW_EX_STYLE(0),
                     PCWSTR(class_w.as_ptr()),
                     PCWSTR::null(),
-                    WS_CHILD | WS_VISIBLE | WS_BORDER,
-                    116,
-                    14,
-                    (w - 480).max(120),
-                    36,
+                    // 不用 WS_BORDER：边框由绘制侧按同一 search_rect 描圆角，方框和圆角打架
+                    WS_CHILD | WS_VISIBLE,
+                    sr.left,
+                    sr.top,
+                    sr.right - sr.left,
+                    sr.bottom - sr.top,
                     Some(hwnd),
                     Some(HMENU(ID_SEARCH as *mut core::ffi::c_void)),
                     Some(hinstance()),
@@ -1393,11 +1444,36 @@ unsafe extern "system" fn launcher_proc(
                 )
             }
             .unwrap_or_default();
+            let name_font = LAUNCHER.with(|c| {
+                let cell = c.borrow();
+                cell.as_ref().map(|s| s.font_name)
+            });
             LAUNCHER.with(|c| {
                 if let Some(s) = c.borrow_mut().as_mut() {
                     s.search = search;
                 }
             });
+            if !search.is_invalid() {
+                unsafe {
+                    if let Some(f) = name_font {
+                        // 搜索字号跟列表名一致（26），默认系统小字在放大后的页眉里太弱
+                        let _ = SendMessageW(
+                            search,
+                            WM_SETFONT,
+                            WPARAM(f.0 as usize),
+                            LPARAM(1),
+                        );
+                    }
+                    // EM_SETCUEBANNER = 0x1501：空框时显示灰色提示词
+                    let cue = wide("搜索 App");
+                    let _ = SendMessageW(
+                        search,
+                        0x1501,
+                        WPARAM(0),
+                        LPARAM(cue.as_ptr() as isize),
+                    );
+                }
+            }
             LRESULT(0)
         }
         WM_PAINT => {
@@ -1542,6 +1618,7 @@ unsafe extern "system" fn launcher_proc(
                         let _ = DeleteObject(HGDIOBJ(s.font_title.0));
                         let _ = DeleteObject(HGDIOBJ(s.font_name.0));
                         let _ = DeleteObject(HGDIOBJ(s.font_sub.0));
+                        let _ = DeleteObject(HGDIOBJ(s.font_head.0));
                     }
                 }
             });
