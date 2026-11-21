@@ -1311,7 +1311,6 @@ fn paint(hwnd: HWND) {
                                 SetTextColor(mem, rgb(30, 30, 34));
                             }
                         }
-                    }
                 } else {
                         let cx = (r.left + r.right) / 2;
                         if let Some(hicon) = icon {
