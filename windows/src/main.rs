@@ -14,6 +14,7 @@ mod ccd;
 mod devices;
 mod display;
 mod guide;
+mod lang;
 mod launcher;
 mod log;
 mod phones;
@@ -25,6 +26,7 @@ mod update;
 mod vdd;
 
 use display::DisplayInfo;
+use lang::tr;
 use std::cell::RefCell;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -56,6 +58,7 @@ const ID_REMOVE: i32 = 1003;
 const ID_MODEL: i32 = 1007;
 const ID_MODE_AUTO: i32 = 1008;
 const ID_MODE_MANUAL: i32 = 1009;
+const ID_LANG: i32 = 1010;
 /// 左上角图标菜单（系统菜单）里「高级模式」子菜单的命令 ID，走 WM_SYSCOMMAND。
 /// 系统命令占 0xF000 段且低 4 位保留，自定义 ID 放低位、比较时按 & 0xFFF0 掩码。
 const IDM_ADV_TEST: usize = 0x0110;
@@ -95,6 +98,8 @@ struct MainState {
     /// 内容卡片的矩形（x, y, w, h），layout 时写入，WM_PAINT 据此画白卡片
     card_phone: (i32, i32, i32, i32),
     combo_model: HWND,
+    /// 右上角语言选择（简体中文 / English），切换即存设置并整窗换文案
+    combo_lang: HWND,
     radio_auto: HWND,
     radio_manual: HWND,
     model_label: HWND,
@@ -142,12 +147,14 @@ unsafe extern "system" {
 
 fn main() {
     log::init();
+    // 语言先定下来（存量设置），后面的日志和界面都按这个语言走
+    lang::set_en(settings::load().english);
     if std::env::args().any(|a| a == "--guide" || a == "--guild") {
         GUIDE_REQUESTED.store(true, Ordering::Relaxed);
     }
     // GUI 子系统下 panic 默认无处可见，统一落到日志文件，方便事后排障
     std::panic::set_hook(Box::new(|info| {
-        log::write(&format!("PANIC：{info}"));
+        log::write(&format!(tr("PANIC：{info}", "PANIC: {info}")));
     }));
     // 单实例：双开时两个进程会同时盯会话、抢着建/拆同一块虚拟屏
     // （2026-11-20 实测有用户同时开了两个）。句柄留到进程退出才释放。
@@ -157,10 +164,10 @@ fn main() {
     let _instance = unsafe { CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr()) };
     if !_instance.is_null() && unsafe { GetLastError() } == 183 {
         // 183 = ERROR_ALREADY_EXISTS：已有实例在跑
-        log::write("已有 SnugWindows 实例在运行，本实例退出");
+        log::write(tr("已有 SnugWindows 实例在运行，本实例退出", "Another SnugWindows instance is already running; this instance exits"));
         return;
     }
-    log::write(&format!("SnugWindows v{} 启动", env!("SNUG_VERSION")));
+    log::write(&format!(tr("SnugWindows v{} 启动", "SnugWindows v{} starting"), env!("SNUG_VERSION")));
     std::process::exit(run());
 }
 
@@ -194,7 +201,7 @@ fn run() -> i32 {
         let win_w = 700 * dpi0 / 96;
         let win_h = 760 * dpi0 / 96;
         let title_w = display::wide(&format!(
-            "Snug for Sunlogin — Windows 版 v{}",
+            tr("Snug for Sunlogin — Windows 版 v{}", "Snug for Sunlogin — Windows Edition v{}"),
             env!("SNUG_VERSION")
         ));
         let hwnd = match CreateWindowExW(
@@ -456,6 +463,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
                 s.btn_remove,
                 s.model_label,
                 s.combo_model,
+                s.combo_lang,
                 s.radio_auto,
                 s.radio_manual,
                 s.phone_hint,
@@ -476,6 +484,7 @@ fn layout_controls(client_w: i32, client_h: i32) {
         b_remove,
         model_label,
         combo_model,
+        combo_lang,
         radio_auto,
         radio_manual,
         phone_hint,
@@ -492,8 +501,10 @@ fn layout_controls(client_w: i32, client_h: i32) {
     let cw = client_w - m * 2;
     // 状态区：图标在左，标题与说明两行在右
     move_ctrl(icon_box, m, sc(12), sc(40), sc(40));
-    move_ctrl(status, m + sc(50), sc(10), cw - sc(50), sc(24));
-    move_ctrl(detail, m + sc(50), sc(36), cw - sc(50), sc(20));
+    move_ctrl(status, m + sc(50), sc(10), cw - sc(50) - sc(112), sc(24));
+    move_ctrl(detail, m + sc(50), sc(36), cw - sc(50) - sc(112), sc(20));
+    // 语言选择钉在右上角（高度含展开列表，收起只占一行）
+    move_ctrl(combo_lang, client_w - m - sc(104), sc(12), sc(104), sc(180));
     // 显示器列表
     move_ctrl(list, m, sc(64), cw, sc(116));
     // 列表正下方的操作行：刷新 / 创建 / 删除，只在手动模式出现；
@@ -562,12 +573,12 @@ fn layout_controls(client_w: i32, client_h: i32) {
 /// 给显示器列表（ListView 报表模式）建列，列宽按 DPI 缩放。
 fn init_list_columns(list: HWND, dpi: i32) {
     let cols: [(&str, i32); 6] = [
-        ("显示器", 105),
-        ("适配器", 175),
-        ("分辨率", 90),
-        ("刷新率", 62),
-        ("位置", 78),
-        ("备注", 150),
+        (tr("显示器", "Display"), 105),
+        (tr("适配器", "Adapter"), 175),
+        (tr("分辨率", "Resolution"), 90),
+        (tr("刷新率", "Refresh rate"), 62),
+        (tr("位置", "Position"), 78),
+        (tr("备注", "Notes"), 150),
     ];
     for (i, (title, w)) in cols.iter().enumerate() {
         let mut buf = display::wide(title);
@@ -606,13 +617,13 @@ fn fill_display_list(list: HWND, displays: &[DisplayInfo]) {
     for (i, d) in displays.iter().enumerate() {
         let mut tags: Vec<String> = Vec::new();
         if d.primary {
-            tags.push("主屏".to_string());
+            tags.push(tr("主屏", "Primary").to_string());
         }
         if d.is_virtual() {
-            tags.push("VDD 虚拟屏".to_string());
+            tags.push(tr("VDD 虚拟屏", "VDD virtual screen").to_string());
         }
         if d.is_phone_mode() {
-            tags.push("手机屏模式".to_string());
+            tags.push(tr("手机屏模式", "Phone-screen mode").to_string());
         }
         if !d.monitor_name.is_empty() && d.monitor_name != d.adapter_name {
             tags.push(d.monitor_name.clone());
@@ -715,16 +726,16 @@ fn status_info(
 ) -> (String, String, StatusLevel) {
     if let Some(d) = displays.iter().find(|d| d.is_virtual() && d.is_phone_mode()) {
         return (
-            "手机屏已就绪".to_string(),
-            format!("{}×{}@{} · 向日葵手机端选这块屏", d.width, d.height, d.hz),
+            tr("手机屏已就绪", "Phone screen ready").to_string(),
+            format!(tr("{}×{}@{} · 向日葵手机端选这块屏", "{}×{}@{} · Pick this screen in the Sunlogin phone app"), d.width, d.height, d.hz),
             StatusLevel::Ready,
         );
     }
     if let Some(d) = displays.iter().find(|d| d.is_virtual()) {
         return (
-            "虚拟屏已创建".to_string(),
+            tr("虚拟屏已创建", "Virtual screen created").to_string(),
             format!(
-                "当前 {}×{}@{}，点「创建手机屏」设成手机尺寸",
+                tr("当前 {}×{}@{}，点「创建手机屏」设成手机尺寸", "Currently {}×{}@{}; click \"Create phone screen\" to set the phone size"),
                 d.width, d.height, d.hz
             ),
             StatusLevel::Warn,
@@ -733,21 +744,21 @@ fn status_info(
     if auto_create && !agent_present {
         let (w, h, _) = phones::current_spec();
         return (
-            "等待主控连入".to_string(),
-            format!("向日葵主控连入后自动建屏 · 当前型号 {w}×{h}"),
+            tr("等待主控连入", "Waiting for a controller").to_string(),
+            format!(tr("向日葵主控连入后自动建屏 · 当前型号 {w}×{h}", "Created automatically when a Sunlogin controller connects · Current model {w}×{h}")),
             StatusLevel::Neutral,
         );
     }
     if vdd::settings_exists() {
         return (
-            "虚拟屏未启动".to_string(),
-            "驱动可能没装好或被禁用，打开配置向导排查".to_string(),
+            tr("虚拟屏未启动", "Virtual screen not running").to_string(),
+            tr("驱动可能没装好或被禁用，打开配置向导排查", "The driver may be missing or disabled; open the setup wizard to check").to_string(),
             StatusLevel::Warn,
         );
     }
     (
-        "未检测到虚拟屏驱动".to_string(),
-        "先打开配置向导装驱动，再创建手机屏".to_string(),
+        tr("未检测到虚拟屏驱动", "Virtual display driver not found").to_string(),
+        tr("先打开配置向导装驱动，再创建手机屏", "Install the driver in the setup wizard first, then create the phone screen").to_string(),
         StatusLevel::Neutral,
     )
 }
@@ -785,21 +796,21 @@ fn refresh_displays() {
     if !detail.is_invalid() {
         set_text(detail, &detail_text);
     }
-    ui_log(&format!("显示器枚举：{} 块", displays.len()));
+    ui_log(&format!(tr("显示器枚举：{} 块", "Displays: {}"), displays.len()));
     for d in &displays {
         ui_log(&format!("  {}", d.describe()));
     }
-    ui_log(&format!("状态：{headline}（{detail_text}）"));
+    ui_log(&format!(tr("状态：{headline}（{detail_text}）", "Status: {headline} ({detail_text})")));
 }
 
 /// 重启 VDD 设备（找设备 → pnputil 重启）。返回是否找到了设备。
 /// 找不到 VDD 适配器时把现场打全，让下一次贴回来的日志能直接定性：
 /// 是驱动根本没装、装了但设备名不一样、还是包已装但设备没建出来。
 fn log_no_vdd_diagnostics(list: &[devices::PnpDevice]) {
-    ui_log(&format!("诊断：PnP 显示类设备共 {} 个：", list.len()));
+    ui_log(&format!(tr("诊断：PnP 显示类设备共 {} 个：", "Diagnostics: {} PnP display-class devices:"), list.len()));
     for d in list {
         ui_log(&format!(
-            "  {} | {} | 状态 {}",
+            tr("  {} | {} | 状态 {}", "  {} | {} | status {}"),
             d.friendly_name, d.instance_id, d.status
         ));
     }
@@ -810,29 +821,29 @@ fn log_no_vdd_diagnostics(list: &[devices::PnpDevice]) {
                 .map(|e| e.file_name().to_string_lossy().into_owned())
                 .collect();
             ui_log(&format!(
-                "诊断：C:\\VirtualDisplayDriver 目录内容：{}",
+                tr("诊断：C:\\VirtualDisplayDriver 目录内容：{}", "Diagnostics: contents of C:\\VirtualDisplayDriver: {}"),
                 if names.is_empty() {
-                    "（空）".to_string()
+                    tr("（空）", "(empty)").to_string()
                 } else {
-                    names.join("、")
+                    names.join(tr("、", ", "))
                 }
             ));
         }
-        Err(e) => ui_log(&format!("诊断：读不了 C:\\VirtualDisplayDriver 目录：{e}")),
+        Err(e) => ui_log(&format!(tr("诊断：读不了 C:\\VirtualDisplayDriver 目录：{e}", "Diagnostics: cannot read the C:\\VirtualDisplayDriver folder: {e}"))),
     }
     match devices::problem_devices() {
         Ok(problems) => {
-            ui_log(&format!("诊断：状态异常的 PnP 设备共 {} 个：", problems.len()));
+            ui_log(&format!(tr("诊断：状态异常的 PnP 设备共 {} 个：", "Diagnostics: {} PnP devices in an error state:"), problems.len()));
             for d in problems.iter().take(10) {
                 ui_log(&format!(
-                    "  {} | {} | 状态 {}",
+                    tr("  {} | {} | 状态 {}", "  {} | {} | status {}"),
                     d.friendly_name, d.instance_id, d.status
                 ));
             }
         }
-        Err(e) => ui_log(&format!("诊断：{e}")),
+        Err(e) => ui_log(&format!(tr("诊断：{e}", "Diagnostics: {e}"))),
     }
-    ui_log("诊断：包在、节点不在，或设备在但驱动没真正起来（管道不通）这类问题，跑同目录的 setup-virtual-display.ps1 排查，它会把驱动活性与系统事件一并查清");
+    ui_log(tr("诊断：包在、节点不在，或设备在但驱动没真正起来（管道不通）这类问题，跑同目录的 setup-virtual-display.ps1 排查，它会把驱动活性与系统事件一并查清", "Diagnostics: for problems like \"package present but node missing\" or \"device present but the driver is not really up\", run setup-virtual-display.ps1 in the same folder; it checks driver liveness and system events together"));
 }
 
 fn restart_vdd_device() -> bool {
@@ -840,11 +851,11 @@ fn restart_vdd_device() -> bool {
         Ok(list) => match devices::find_vdd(&list) {
             Some(dev) => {
                 ui_log(&format!(
-                    "重启 VDD 设备让配置生效：{}（{}，状态 {}）",
+                    tr("重启 VDD 设备让配置生效：{}（{}，状态 {}）", "Restarting the VDD device to apply the config: {} ({}, status {})"),
                     dev.friendly_name, dev.instance_id, dev.status
                 ));
                 let (exit, output) = devices::restart_device(&dev.instance_id);
-                ui_log(&format!("pnputil 退出码 {exit}"));
+                ui_log(&format!(tr("pnputil 退出码 {exit}", "pnputil exit code {exit}")));
                 if exit != 0 {
                     let tail: Vec<&str> = output.lines().rev().take(3).collect();
                     for line in tail.iter().rev() {
@@ -854,7 +865,7 @@ fn restart_vdd_device() -> bool {
                 true
             }
             None => {
-                ui_log("没找到 VDD 显示适配器（驱动没装？）——配置已写好，装好驱动后重启设备即可生效");
+                ui_log(tr("没找到 VDD 显示适配器（驱动没装？）——配置已写好，装好驱动后重启设备即可生效", "VDD display adapter not found (driver not installed?) — the config is written; install the driver and restart the device to apply it"));
                 log_no_vdd_diagnostics(&list);
                 false
             }
@@ -886,13 +897,13 @@ fn cycle_vdd_device() {
         Ok(list) => match devices::find_vdd(&list) {
             Some(dev) => {
                 ui_log(&format!(
-                    "禁用→启用循环 VDD 设备：{}（{}，状态 {}）",
+                    tr("禁用→启用循环 VDD 设备：{}（{}，状态 {}）", "Disable→enable cycle of the VDD device: {} ({}, status {})"),
                     dev.friendly_name, dev.instance_id, dev.status
                 ));
                 let (exit, _) = devices::cycle_device(&dev.instance_id);
-                ui_log(&format!("循环后启用退出码 {exit}"));
+                ui_log(&format!(tr("循环后启用退出码 {exit}", "Enable-after-cycle exit code {exit}")));
             }
-            None => ui_log("禁用→启用循环：没找到 VDD 设备，跳过"),
+            None => ui_log(tr("禁用→启用循环：没找到 VDD 设备，跳过", "Disable→enable cycle: no VDD device found, skipped")),
         },
         Err(e) => ui_log(&e),
     }
@@ -904,17 +915,17 @@ fn try_activate_vdd_path() -> bool {
     match ccd::activate_vdd() {
         Ok(outcome) => {
             for note in &outcome.notes {
-                ui_log(&format!("拓扑：{note}"));
+                ui_log(&format!(tr("拓扑：{note}", "Topology: {note}")));
             }
             if outcome.applied {
-                ui_log("拓扑：已把 VDD 路径激活并存盘");
+                ui_log(tr("拓扑：已把 VDD 路径激活并存盘", "Topology: VDD path activated and saved"));
             } else if outcome.found && outcome.was_active {
-                ui_log("拓扑：VDD 路径本就是激活的，问题不在这一层");
+                ui_log(tr("拓扑：VDD 路径本就是激活的，问题不在这一层", "Topology: the VDD path was already active; the problem is elsewhere"));
             }
             outcome.applied
         }
         Err(e) => {
-            ui_log(&format!("拓扑：{e}"));
+            ui_log(&format!(tr("拓扑：{e}", "Topology: {e}")));
             false
         }
     }
@@ -926,11 +937,11 @@ fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
         Ok(list) => match devices::find_vdd(&list) {
             Some(dev) => {
                 ui_log(&format!(
-                    "{verb} VDD 设备：{}（{}，状态 {}）",
+                    tr("{verb} VDD 设备：{}（{}，状态 {}）", "{verb} VDD device: {} ({}, status {})"),
                     dev.friendly_name, dev.instance_id, dev.status
                 ));
                 let (exit, output) = action(&dev.instance_id);
-                ui_log(&format!("pnputil 退出码 {exit}"));
+                ui_log(&format!(tr("pnputil 退出码 {exit}", "pnputil exit code {exit}")));
                 if exit != 0 {
                     let tail: Vec<&str> = output.lines().rev().take(3).collect();
                     for line in tail.iter().rev() {
@@ -940,7 +951,7 @@ fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
                 exit == 0
             }
             None => {
-                ui_log("没找到 MttVDD 设备（硬件 ID ROOT\\MttVDD）——驱动没装好，先运行安装脚本 setup-virtual-display.ps1");
+                ui_log(tr("没找到 MttVDD 设备（硬件 ID ROOT\\MttVDD）——驱动没装好，先运行安装脚本 setup-virtual-display.ps1", "MttVDD device not found (hardware ID ROOT\\MttVDD) — the driver is not installed properly; run the setup-virtual-display.ps1 installer first"));
                 false
             }
         },
@@ -952,13 +963,13 @@ fn vdd_device_action(verb: &str, action: fn(&str) -> (i32, String)) -> bool {
 }
 
 pub(crate) fn create_phone_screen() {
-    ui_log("—— 创建手机屏 ——");
+    ui_log(tr("—— 创建手机屏 ——", "—— Creating the phone screen ——"));
     let (pw, ph, phz) = phones::current_spec();
     let mut state = vdd::load_state();
     let (mut text, created) = match vdd::load_settings() {
         Ok(t) => (t, false),
         Err(_) => {
-            ui_log("配置文件不存在，用官方模板新建（已含手机屏分辨率与 count=1）");
+            ui_log(tr("配置文件不存在，用官方模板新建（已含手机屏分辨率与 count=1）", "Config file missing; creating it from the official template (includes the phone resolution and count=1)"));
             (vdd::create_default_settings(), true)
         }
     };
@@ -970,30 +981,30 @@ pub(crate) fn create_phone_screen() {
         let count = vdd::get_count(&text).unwrap_or(0);
         if count < 1 {
             text = vdd::set_count(&text, 1);
-            ui_log("monitors/count 设为 1");
+            ui_log(tr("monitors/count 设为 1", "monitors/count set to 1"));
         }
         if vdd::has_phone_resolution(&text) {
-            ui_log(&format!("配置里已有 {pw}×{ph} 分辨率，不重复加"));
+            ui_log(&format!(tr("配置里已有 {pw}×{ph} 分辨率，不重复加", "The config already has a {pw}×{ph} resolution; not adding a duplicate")));
         } else {
             text = vdd::add_phone_resolution(&text);
             state.added_resolution = true;
-            ui_log(&format!("已往配置加入 {pw}×{ph}@{phz} 分辨率"));
+            ui_log(&format!(tr("已往配置加入 {pw}×{ph}@{phz} 分辨率", "Added resolution {pw}×{ph}@{phz} to the config")));
         }
     }
     if let Err(e) = vdd::save_settings(&text) {
-        ui_log(&format!("写配置文件失败：{e}"));
+        ui_log(&format!(tr("写配置文件失败：{e}", "Failed to write the config file: {e}")));
         return;
     }
     vdd::save_state(&state);
     if created {
-        ui_log("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（新建文件，无原文件可备份）");
+        ui_log(tr("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（新建文件，无原文件可备份）", "Config written to C:\\VirtualDisplayDriver\\vdd_settings.xml (new file; no original to back up)"));
     } else {
-        ui_log("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（原文件备份为 .snug-pristine.bak）");
+        ui_log(tr("配置已写入 C:\\VirtualDisplayDriver\\vdd_settings.xml（原文件备份为 .snug-pristine.bak）", "Config written to C:\\VirtualDisplayDriver\\vdd_settings.xml (original backed up as .snug-pristine.bak)"));
     }
 
     // 移除手机屏会把设备禁用：先启用回来（本就启用时重复启用无害，成败只记日志，
     // 后面的重启设备自带 disable+enable 兜底，不在这里中断）
-    vdd_device_action("启用", devices::enable_device);
+    vdd_device_action(tr("启用", "Enable"), devices::enable_device);
     if !restart_vdd_device() {
         return;
     }
@@ -1008,17 +1019,17 @@ pub(crate) fn create_phone_screen() {
         // 第二级：拓扑激活——2026-11-21 定案的主要失效模式。向日葵断开会把
         // 虚拟屏路径摘出活动拓扑并存盘，设备/驱动/配置全正常它也不回来，
         // 只有把 CCD 路径重新激活才行（ccd.rs）。
-        ui_log("重启设备后虚拟屏没回来，检查显示拓扑…");
+        ui_log(tr("重启设备后虚拟屏没回来，检查显示拓扑…", "The virtual screen did not come back after the device restart; checking the display topology…"));
         if try_activate_vdd_path() {
             up = poll_virtual(10);
         }
     }
     if !up {
-        ui_log("拓扑这级没解决，改走 nefcon 重装 VDD 节点…");
+        ui_log(tr("拓扑这级没解决，改走 nefcon 重装 VDD 节点…", "The topology step did not fix it; reinstalling the VDD node with nefcon…"));
         match devices::nefcon_install() {
             Some((exit, output)) => {
                 ui_log(&format!(
-                    "nefcon install 退出码 {exit}（0/3010 均算装上，最终看枚举）"
+                    tr("nefcon install 退出码 {exit}（0/3010 均算装上，最终看枚举）", "nefcon install exit code {exit} (0/3010 both count as installed; the enumeration decides)")
                 ));
                 if exit != 0 && exit != 3010 {
                     let tail: Vec<&str> = output.lines().rev().take(3).collect();
@@ -1028,11 +1039,11 @@ pub(crate) fn create_phone_screen() {
                 }
             }
             None => {
-                ui_log("随包里没找到 nefcon 或 MttVDD.inf，跳过 nefcon 这一步");
+                ui_log(tr("随包里没找到 nefcon 或 MttVDD.inf，跳过 nefcon 这一步", "nefcon or MttVDD.inf not found in the bundle; skipping the nefcon step"));
             }
         }
         if !poll_virtual(15) {
-            ui_log("nefcon 后仍没虚拟屏，再试禁用→启用循环…");
+            ui_log(tr("nefcon 后仍没虚拟屏，再试禁用→启用循环…", "Still no virtual screen after nefcon; trying a disable→enable cycle…"));
             cycle_vdd_device();
             // 设备重现后路径可能仍未激活，再补一次拓扑激活
             if !poll_virtual(5) && try_activate_vdd_path() {
@@ -1050,17 +1061,17 @@ pub(crate) fn create_phone_screen() {
     });
     match virtual_now {
         Some(d) if d.is_phone_mode() => {
-            ui_log(&format!("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试"));
+            ui_log(&format!(tr("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试", "Done: phone screen ready ({pw}×{ph}@{phz}). Connect to this PC from the Sunlogin phone app and pick this screen to test")));
             apply_phone_scale();
         }
         Some(d) => {
             ui_log(&format!(
-                "虚拟屏当前 {}×{}@{}，设置成手机屏模式…",
+                tr("虚拟屏当前 {}×{}@{}，设置成手机屏模式…", "The virtual screen is currently {}×{}@{}; setting phone-screen mode…"),
                 d.width, d.height, d.hz
             ));
             let r = display::set_mode(&d.device_name, pw, ph, phz);
             ui_log(&format!(
-                "ChangeDisplaySettingsEx 返回 {r}（0 = 成功）"
+                tr("ChangeDisplaySettingsEx 返回 {r}（0 = 成功）", "ChangeDisplaySettingsEx returned {r} (0 = success)")
             ));
             wait_pump(900);
             refresh_displays();
@@ -1071,14 +1082,14 @@ pub(crate) fn create_phone_screen() {
                     .unwrap_or(false)
             });
             if ok {
-                ui_log(&format!("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试"));
+                ui_log(&format!(tr("完成：手机屏已就绪（{pw}×{ph}@{phz}）。用向日葵手机端连这台电脑、选这块屏测试", "Done: phone screen ready ({pw}×{ph}@{phz}). Connect to this PC from the Sunlogin phone app and pick this screen to test")));
                 apply_phone_scale();
             } else {
-                ui_log(&format!("设模式后仍不是 {pw}×{ph}，看上面枚举结果确认虚拟屏实际模式，并把日志贴回主会话"));
+                ui_log(&format!(tr("设模式后仍不是 {pw}×{ph}，看上面枚举结果确认虚拟屏实际模式，并把日志贴回主会话", "Still not {pw}×{ph} after setting the mode; check the enumeration above for the actual mode and share this log for diagnosis")));
             }
         }
         None => {
-            ui_log("建屏阶梯（重启设备／拓扑激活／nefcon 重装／禁用启用循环）都没把虚拟屏带起来：打开设备管理器看 Virtual Display Driver 的状态，把这段日志贴回主会话");
+            ui_log(tr("建屏阶梯（重启设备／拓扑激活／nefcon 重装／禁用启用循环）都没把虚拟屏带起来：打开设备管理器看 Virtual Display Driver 的状态，把这段日志贴回主会话", "Every step of the create ladder (device restart / topology activation / nefcon reinstall / disable-enable cycle) failed to bring up the virtual screen: check the Virtual Display Driver status in Device Manager and share this log for diagnosis"));
         }
     }
 }
@@ -1092,12 +1103,12 @@ fn apply_phone_scale() {
     let info = match scale::query(&v.device_name) {
         Ok(i) => i,
         Err(e) => {
-            ui_log(&format!("虚拟屏缩放：{e}"));
+            ui_log(&format!(tr("虚拟屏缩放：{e}", "Virtual screen scaling: {e}")));
             return;
         }
     };
     if info.percent >= scale::PHONE_MIN_PERCENT {
-        ui_log(&format!("虚拟屏缩放已是 {}%，够大，不动", info.percent));
+        ui_log(&format!(tr("虚拟屏缩放已是 {}%，够大，不动", "Virtual screen scaling is already {}%, large enough; leaving it as is"), info.percent));
         return;
     }
     let mut state = vdd::load_state();
@@ -1107,74 +1118,74 @@ fn apply_phone_scale() {
     }
     match scale::set_percent(&v.device_name, scale::PHONE_MIN_PERCENT) {
         Ok(actual) => ui_log(&format!(
-            "虚拟屏缩放 {}% → {actual}%（手机上界面更大、更好点）",
+            tr("虚拟屏缩放 {}% → {actual}%（手机上界面更大、更好点）", "Virtual screen scaling {}% → {actual}% (a bigger UI on the phone, easier to tap)"),
             info.percent
         )),
-        Err(e) => ui_log(&format!("虚拟屏缩放没调成：{e}")),
+        Err(e) => ui_log(&format!(tr("虚拟屏缩放没调成：{e}", "Could not set the virtual screen scaling: {e}"))),
     }
 }
 
 pub(crate) fn remove_phone_screen() {
-    ui_log("—— 移除手机屏（恢复配置） ——");
+    ui_log(tr("—— 移除手机屏（恢复配置） ——", "—— Removing the phone screen (restoring the config) ——"));
     let state = vdd::load_state();
     // 缩放还原要趁虚拟屏还在时做：后面设备一禁用就够不着这块屏了
     if let Some(rel) = state.scale_rel_before {
         match display::list().into_iter().find(|d| d.is_virtual()) {
             Some(v) => match scale::set_rel(&v.device_name, rel) {
-                Ok(()) => ui_log("虚拟屏缩放已还原到建屏前"),
-                Err(e) => ui_log(&format!("虚拟屏缩放还原失败：{e}")),
+                Ok(()) => ui_log(tr("虚拟屏缩放已还原到建屏前", "Virtual screen scaling restored to its pre-create value")),
+                Err(e) => ui_log(&format!(tr("虚拟屏缩放还原失败：{e}", "Failed to restore the virtual screen scaling: {e}"))),
             },
-            None => ui_log("虚拟屏当前不在，缩放没法还原（它下次出现时可能仍是放大值）"),
+            None => ui_log(tr("虚拟屏当前不在，缩放没法还原（它下次出现时可能仍是放大值）", "The virtual screen is not present, so its scaling cannot be restored (it may still be enlarged next time it appears)")),
         }
     }
     if state.created_file && vdd::settings_exists() {
         // 配置文件是本应用新建的：整个删掉就是最干净的回滚
         match std::fs::remove_file(vdd::SETTINGS_PATH) {
-            Ok(()) => ui_log("已删除本应用新建的配置文件"),
-            Err(e) => ui_log(&format!("删配置文件失败：{e}")),
+            Ok(()) => ui_log(tr("已删除本应用新建的配置文件", "Deleted the config file this app created")),
+            Err(e) => ui_log(&format!(tr("删配置文件失败：{e}", "Failed to delete the config file: {e}"))),
         }
     } else if vdd::settings_exists() {
         match vdd::load_settings() {
             Ok(text) => {
                 // 先把配置现状打进日志：解析口径和下面的手术一致，删没删掉当场对得上账
                 ui_log(&format!(
-                    "配置现状：count={}，分辨率：{}",
+                    tr("配置现状：count={}，分辨率：{}", "Current config: count={}, resolutions: {}"),
                     vdd::get_count(&text)
                         .map(|n| n.to_string())
-                        .unwrap_or_else(|| "读不到".to_string()),
+                        .unwrap_or_else(|| tr("读不到", "unreadable").to_string()),
                     vdd::resolution_summary(&text)
                 ));
                 let (mut text, removed) = vdd::remove_phone_resolution(&text);
                 if removed > 0 {
-                    ui_log(&format!("已从配置删掉 {removed} 条手机屏分辨率"));
+                    ui_log(&format!(tr("已从配置删掉 {removed} 条手机屏分辨率", "Removed {removed} phone-screen resolution(s) from the config")));
                 } else {
-                    ui_log("配置里没有手机屏分辨率，无需删");
+                    ui_log(tr("配置里没有手机屏分辨率，无需删", "No phone-screen resolution in the config; nothing to remove"));
                 }
                 if let Some(orig) = state.original_count {
                     text = vdd::set_count(&text, orig);
-                    ui_log(&format!("monitors/count 恢复为 {orig}"));
+                    ui_log(&format!(tr("monitors/count 恢复为 {orig}", "monitors/count restored to {orig}")));
                 }
                 if let Err(e) = vdd::save_settings(&text) {
-                    ui_log(&format!("写配置文件失败：{e}"));
+                    ui_log(&format!(tr("写配置文件失败：{e}", "Failed to write the config file: {e}")));
                     return;
                 }
             }
             Err(e) => {
-                ui_log(&format!("读配置文件失败：{e}"));
+                ui_log(&format!(tr("读配置文件失败：{e}", "Failed to read the config file: {e}")));
                 return;
             }
         }
     } else {
-        ui_log("没有配置文件，无需恢复");
+        ui_log(tr("没有配置文件，无需恢复", "No config file; nothing to restore"));
     }
     vdd::clear_state();
     // 配置改回去还不够：MttVDD 只要设备启用着就一直挂着这块屏（count 恢复成 1 也还有一块），
     // 必须禁用设备它才真的消失；下次创建会先启用回来。
-    if vdd_device_action("禁用", devices::disable_device) {
+    if vdd_device_action(tr("禁用", "Disable"), devices::disable_device) {
         wait_pump(1500);
     }
     refresh_displays();
-    ui_log("（原始配置的完整备份仍在 vdd_settings.xml.snug-pristine.bak）");
+    ui_log(tr("（原始配置的完整备份仍在 vdd_settings.xml.snug-pristine.bak）", "(The full backup of the original config is still at vdd_settings.xml.snug-pristine.bak)"));
     // 以枚举结果为准下结论，不无条件报「移除完成」
     let still_there = MAIN.with(|c| {
         c.borrow()
@@ -1183,9 +1194,9 @@ pub(crate) fn remove_phone_screen() {
             .unwrap_or(false)
     });
     if still_there {
-        ui_log("⚠ 移除后虚拟屏还在（禁用没生效？）——把这段日志贴回主会话");
+        ui_log(tr("⚠ 移除后虚拟屏还在（禁用没生效？）——把这段日志贴回主会话", "⚠ The virtual screen is still present after removal (the disable did not take effect?) — share this log for diagnosis"));
     } else {
-        ui_log("移除完成：虚拟屏已消失（下次点「创建手机屏」会自动重新启用驱动）");
+        ui_log(tr("移除完成：虚拟屏已消失（下次点「创建手机屏」会自动重新启用驱动）", "Removal complete: the virtual screen is gone (the driver is re-enabled automatically next time a phone screen is created)"));
     }
 }
 
@@ -1197,6 +1208,149 @@ fn set_screen_owner(auto: bool) {
     });
 }
 
+/// 右上角语言切换：存设置后整窗换文案（静态控件、标题、列表列、型号名、
+/// 系统菜单），状态与列表走 refresh_displays 按新语言重出；之后的日志
+/// 也都按新语言。启动器与向导在下次打开时按新语言绘制。
+fn on_lang_changed(hwnd: HWND) {
+    let combo = MAIN
+        .with(|c| c.borrow().as_ref().map(|s| s.combo_lang))
+        .unwrap_or_default();
+    if combo.is_invalid() {
+        return;
+    }
+    let idx = unsafe { SendMessageW(combo, CB_GETCURSEL, None, None) }.0 as i32;
+    let en = idx == 1;
+    if en == lang::is_en() {
+        return;
+    }
+    lang::set_en(en);
+    persist_settings();
+    apply_ui_texts(hwnd);
+    ui_log(tr(
+        "界面语言已切换为简体中文",
+        "UI language switched to English",
+    ));
+}
+
+/// 按当前语言重刷主窗口全部静态文案。
+fn apply_ui_texts(hwnd: HWND) {
+    let s = MAIN.with(|c| {
+        c.borrow().as_ref().map(|s| {
+            (
+                s.lbl_phone,
+                s.btn_create,
+                s.btn_remove,
+                s.phone_hint,
+                s.model_label,
+                s.radio_auto,
+                s.radio_manual,
+                s.btn_refresh,
+                s.list,
+                s.combo_model,
+                s.phone_model_id.clone(),
+                s.dpi,
+            )
+        })
+    });
+    let Some((
+        lbl_phone,
+        btn_create,
+        btn_remove,
+        phone_hint,
+        model_label,
+        radio_auto,
+        radio_manual,
+        btn_refresh,
+        list,
+        combo_model,
+        model_id,
+        dpi,
+    )) = s
+    else {
+        return;
+    };
+    set_text(lbl_phone, tr("手机屏", "Phone screen"));
+    set_text(btn_create, tr("创建手机屏", "Create phone screen"));
+    set_text(btn_remove, tr("移除手机屏", "Remove phone screen"));
+    set_text(
+        phone_hint,
+        tr(
+            "向日葵中增加一块竖屏；移除会禁用驱动，创建时重新启用",
+            "Adds a portrait screen for Sunlogin; removal disables the driver, creating re-enables it",
+        ),
+    );
+    set_text(model_label, tr("手机型号", "Phone model"));
+    set_text(
+        radio_auto,
+        tr(
+            "自动：主控连入建屏并打开资源库，断开删屏",
+            "Auto: create the screen and open the app library on connect, remove on disconnect",
+        ),
+    );
+    set_text(
+        radio_manual,
+        tr(
+            "手动：用上面的按钮建屏、删屏",
+            "Manual: use the buttons above to create/remove the screen",
+        ),
+    );
+    set_text(btn_refresh, tr("刷新显示器", "Refresh displays"));
+    set_text(
+        hwnd,
+        &format!(
+            tr(
+                "Snug for Sunlogin — Windows 版 v{}",
+                "Snug for Sunlogin — Windows Edition v{}",
+            ),
+            env!("SNUG_VERSION")
+        ),
+    );
+    // 列表列：删光重建（LVM_DELETECOLUMN 每次删第 0 列）
+    unsafe {
+        while SendMessageW(list, LVM_DELETECOLUMN, Some(WPARAM(0)), Some(LPARAM(0))).0 != 0 {
+            // 一直删到删不动为止
+        }
+    }
+    init_list_columns(list, dpi);
+    // 型号下拉：按新语言重填显示名，选中项按存的 id 找回位置
+    unsafe {
+        SendMessageW(combo_model, CB_RESETCONTENT, None, None);
+    }
+    for m in phones::catalog() {
+        let name_w = display::wide(&phones::display_name(&m.id));
+        unsafe {
+            SendMessageW(
+                combo_model,
+                CB_ADDSTRING,
+                None,
+                Some(LPARAM(name_w.as_ptr() as isize)),
+            );
+        }
+    }
+    let sel = phones::catalog()
+        .iter()
+        .position(|m| m.id == model_id)
+        .unwrap_or(0);
+    unsafe {
+        SendMessageW(combo_model, CB_SETCURSEL, Some(WPARAM(sel)), None);
+    }
+    // 系统菜单：重置为系统默认后按新语言重装「高级模式」
+    unsafe {
+        let _ = GetSystemMenu(hwnd, true);
+    }
+    install_advanced_menu(hwnd);
+    // 状态、说明与列表行按新语言重出，主题控件再全体重擦一次防灰带
+    refresh_displays();
+    unsafe {
+        let _ = RedrawWindow(
+            Some(hwnd),
+            None,
+            None,
+            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN,
+        );
+    }
+}
+
 fn persist_settings() {
     MAIN.with(|c| {
         if let Some(s) = c.borrow().as_ref() {
@@ -1204,6 +1358,7 @@ fn persist_settings() {
                 phone_model_id: s.phone_model_id.clone(),
                 auto_create: s.auto_create,
                 only_virtual: s.only_virtual,
+                english: lang::is_en(),
             });
         }
     });
@@ -1216,16 +1371,16 @@ fn install_advanced_menu(hwnd: HWND) {
         let Ok(sub) = CreatePopupMenu() else {
             return;
         };
-        let t1 = display::wide("测试窗口");
-        let t2 = display::wide("启动器");
-        let t3 = display::wide("连入时仅输出虚拟屏（关闭物理屏）");
+        let t1 = display::wide(tr("测试窗口", "Test window"));
+        let t2 = display::wide(tr("启动器", "Launcher"));
+        let t3 = display::wide(tr("连入时仅输出虚拟屏（关闭物理屏）", "Virtual screen only while connected (turn off physical displays)"));
         let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_TEST, PCWSTR(t1.as_ptr()));
         let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_LAUNCHER, PCWSTR(t2.as_ptr()));
         let _ = AppendMenuW(sub, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(sub, MF_STRING, IDM_ADV_ONLY_VIRTUAL, PCWSTR(t3.as_ptr()));
         let sys = GetSystemMenu(hwnd, false);
         if !sys.is_invalid() {
-            let label = display::wide("高级模式");
+            let label = display::wide(tr("高级模式", "Advanced"));
             let _ = AppendMenuW(sys, MF_SEPARATOR, 0, PCWSTR::null());
             let _ = AppendMenuW(sys, MF_POPUP, sub.0 as usize, PCWSTR(label.as_ptr()));
         }
@@ -1272,15 +1427,15 @@ fn toggle_only_virtual() {
     persist_settings();
     sync_adv_menu_check();
     if on {
-        ui_log("高级模式：连入时仅输出虚拟屏 = 开（主控连入后关掉物理屏，断开自动恢复）");
+        ui_log(tr("高级模式：连入时仅输出虚拟屏 = 开（主控连入后关掉物理屏，断开自动恢复）", "Advanced: virtual screen only while connected = ON (physical displays turn off on connect and are restored on disconnect)"));
         if session::AGENT_PRESENT.load(Ordering::Relaxed)
             && display::list().iter().any(|d| d.is_virtual())
         {
-            turn_off_physicals("菜单开启且主控正连着");
+            turn_off_physicals(tr("菜单开启且主控正连着", "enabled from the menu while a controller is connected"));
         }
     } else {
-        ui_log("高级模式：连入时仅输出虚拟屏 = 关");
-        restore_physicals_if_off("菜单关闭");
+        ui_log(tr("高级模式：连入时仅输出虚拟屏 = 关", "Advanced: virtual screen only while connected = OFF"));
+        restore_physicals_if_off(tr("菜单关闭", "disabled from the menu"));
     }
 }
 
@@ -1292,11 +1447,11 @@ fn turn_off_physicals(reason: &str) {
     if already {
         return;
     }
-    ui_log(&format!("仅输出虚拟屏（{reason}）：正在关闭物理屏…"));
+    ui_log(&format!(tr("仅输出虚拟屏（{reason}）：正在关闭物理屏…", "Virtual screen only ({reason}): turning off the physical displays…")));
     match ccd::disable_physicals() {
         Ok(out) => {
             for n in &out.notes {
-                ui_log(&format!("拓扑：{n}"));
+                ui_log(&format!(tr("拓扑：{n}", "Topology: {n}")));
             }
             if out.applied {
                 let mut st = vdd::load_state();
@@ -1307,7 +1462,7 @@ fn turn_off_physicals(reason: &str) {
                         s.physical_off = true;
                     }
                 });
-                ui_log("物理屏已关闭，现在只输出虚拟屏（断开后自动恢复）");
+                ui_log(tr("物理屏已关闭，现在只输出虚拟屏（断开后自动恢复）", "Physical displays off; only the virtual screen is output now (restored automatically on disconnect)"));
                 // 关屏把虚拟屏源位置移到了 (0,0)，资源库窗口不一定跟着走
                 // （机主 2026-11-22 实测：连入后资源库没出现在虚拟屏上）：
                 // 按当前枚举到的虚拟屏矩形把它钉回去，没开列表时只移悬浮按钮
@@ -1319,16 +1474,16 @@ fn turn_off_physicals(reason: &str) {
                         bottom: d.y + d.height as i32,
                     };
                     if launcher::move_to(rect) {
-                        ui_log("资源库已按虚拟屏新位置重新对齐");
+                        ui_log(tr("资源库已按虚拟屏新位置重新对齐", "App library re-aligned to the virtual screen's new position"));
                     }
                 }
             } else if out.changed == 0 {
-                ui_log("没有可关的物理屏（本来就只剩虚拟屏？），保持现状");
+                ui_log(tr("没有可关的物理屏（本来就只剩虚拟屏？），保持现状", "No physical display to turn off (only the virtual screen left?); leaving things as they are"));
             } else {
-                ui_log("⚠ 关物理屏没成功，物理屏保持原样（详见上面拓扑日志）");
+                ui_log(tr("⚠ 关物理屏没成功，物理屏保持原样（详见上面拓扑日志）", "⚠ Turning off the physical displays did not succeed; they stay as they were (see the topology log above)"));
             }
         }
-        Err(e) => ui_log(&format!("⚠ 关物理屏失败：{e}（物理屏保持原样）")),
+        Err(e) => ui_log(&format!(tr("⚠ 关物理屏失败：{e}（物理屏保持原样）", "⚠ Failed to turn off the physical displays: {e} (they stay as they were)"))),
     }
 }
 
@@ -1342,11 +1497,11 @@ fn restore_physicals_if_off(reason: &str) {
     if !off {
         return;
     }
-    ui_log(&format!("恢复物理屏（{reason}）…"));
+    ui_log(&format!(tr("恢复物理屏（{reason}）…", "Restoring the physical displays ({reason})…")));
     match ccd::restore_physicals() {
         Ok(out) => {
             for n in &out.notes {
-                ui_log(&format!("拓扑：{n}"));
+                ui_log(&format!(tr("拓扑：{n}", "Topology: {n}")));
             }
             if out.applied || out.changed == 0 {
                 let mut st = vdd::load_state();
@@ -1357,13 +1512,13 @@ fn restore_physicals_if_off(reason: &str) {
                         s.physical_off = false;
                     }
                 });
-                ui_log("物理屏已恢复");
+                ui_log(tr("物理屏已恢复", "Physical displays restored"));
             } else {
-                ui_log("⚠ 物理屏恢复未通过复查，标记保留（下次启动会再试；也可重启机器，关屏时未存盘、重启必恢复）");
+                ui_log(tr("⚠ 物理屏恢复未通过复查，标记保留（下次启动会再试；也可重启机器，关屏时未存盘、重启必恢复）", "⚠ The restore did not pass verification; the flag is kept (will retry at next startup; a reboot also restores, because turning the displays off was never saved)"));
             }
         }
         Err(e) => ui_log(&format!(
-            "⚠ 物理屏恢复失败：{e}（标记保留，下次启动再试；重启机器也可恢复）"
+            tr("⚠ 物理屏恢复失败：{e}（标记保留，下次启动再试；重启机器也可恢复）", "⚠ Failed to restore the physical displays: {e} (flag kept; will retry at next startup; a reboot also restores)")
         )),
     }
 }
@@ -1396,7 +1551,7 @@ fn on_model_changed() {
             .unwrap_or(false)
     });
     if has_virtual {
-        ui_log("换型号：先移除现有虚拟屏…");
+        ui_log(tr("换型号：先移除现有虚拟屏…", "Switching model: removing the current virtual screen first…"));
         remove_phone_screen();
     }
     phones::set_current_model(&model);
@@ -1407,7 +1562,7 @@ fn on_model_changed() {
     });
     persist_settings();
     let (w, h, hz) = phones::current_spec();
-    ui_log(&format!("手机型号 → {}（虚拟屏 {}×{}@{}）", model.id, w, h, hz));
+    ui_log(&format!(tr("手机型号 → {}（虚拟屏 {}×{}@{}）", "Phone model → {} (virtual screen {}×{}@{})"), phones::display_name(&model.id), w, h, hz));
     if has_virtual {
         create_phone_screen();
     }
@@ -1431,7 +1586,7 @@ fn apply_auto_setting(auto: bool) {
     }
     persist_settings();
     if auto {
-        ui_log("模式：自动（主控连入建屏并打开资源库，断开删屏）");
+        ui_log(tr("模式：自动（主控连入建屏并打开资源库，断开删屏）", "Mode: Auto (create the screen and open the app library on connect, remove on disconnect)"));
         let has_virtual = MAIN.with(|c| {
             c.borrow()
                 .as_ref()
@@ -1439,13 +1594,13 @@ fn apply_auto_setting(auto: bool) {
                 .unwrap_or(false)
         });
         if session::AGENT_PRESENT.load(Ordering::Relaxed) && !has_virtual {
-            ui_log("主控已经连着，立即创建手机屏…");
+            ui_log(tr("主控已经连着，立即创建手机屏…", "A controller is already connected; creating the phone screen now…"));
             set_screen_owner(true);
             create_phone_screen();
             open_launcher_on_virtual();
         }
     } else {
-        ui_log("模式：手动（创建/移除用「创建手机屏」「移除手机屏」按钮）");
+        ui_log(tr("模式：手动（创建/移除用「创建手机屏」「移除手机屏」按钮）", "Mode: Manual (use the \"Create phone screen\" / \"Remove phone screen\" buttons)"));
     }
     refresh_displays();
 }
@@ -1467,22 +1622,22 @@ fn pick_target_display() -> Option<DisplayInfo> {
 fn toggle_test_window() {
     if testwin::is_open() {
         testwin::close();
-        ui_log("测试窗口已关闭");
+        ui_log(tr("测试窗口已关闭", "Test window closed"));
         return;
     }
     let target = pick_target_display();
     match target {
         Some(d) => {
             ui_log(&format!(
-                "在 {} 上打开测试窗口（{}×{} @ {},{}）",
+                tr("在 {} 上打开测试窗口（{}×{} @ {},{}）", "Opening the test window on {} ({}×{} @ {},{})"),
                 d.device_name, d.width, d.height, d.x, d.y
             ));
             match testwin::open(d.x, d.y, d.width as i32, d.height as i32) {
-                Ok(()) => ui_log("测试窗口已打开：默认动态模式，左上角按钮可切到静态对照"),
-                Err(e) => ui_log(&format!("打开测试窗口失败：{e}")),
+                Ok(()) => ui_log(tr("测试窗口已打开：默认动态模式，左上角按钮可切到静态对照", "Test window open: dynamic mode by default; the top-left button switches to the static comparison")),
+                Err(e) => ui_log(&format!(tr("打开测试窗口失败：{e}", "Failed to open the test window: {e}"))),
             }
         }
-        None => ui_log("没有可用的显示器，先点「刷新显示器」"),
+        None => ui_log(tr("没有可用的显示器，先点「刷新显示器」", "No display available; click \"Refresh displays\" first")),
     }
 }
 
@@ -1503,17 +1658,17 @@ fn open_launcher_on_virtual() {
                 bottom: d.y + d.height as i32,
             };
             ui_log(&format!(
-                "自动打开资源库到虚拟屏 {}（{}×{}）",
+                tr("自动打开资源库到虚拟屏 {}（{}×{}）", "Auto-opening the app library on virtual screen {} ({}×{})"),
                 d.device_name, d.width, d.height
             ));
             if launcher::is_open() {
                 launcher::close();
             }
             if let Err(e) = launcher::open(rect) {
-                ui_log(&format!("打开资源库失败：{e}"));
+                ui_log(&format!(tr("打开资源库失败：{e}", "Failed to open the app library: {e}")));
             }
         }
-        None => ui_log("虚拟屏没就绪，资源库暂不打开"),
+        None => ui_log(tr("虚拟屏没就绪，资源库暂不打开", "The virtual screen is not ready; not opening the app library yet")),
     }
 }
 
@@ -1528,13 +1683,13 @@ fn toggle_launcher() {
             };
             if !launcher::is_open() {
                 ui_log(&format!(
-                    "在 {} 上打开 App 资源库（{}×{}）",
+                    tr("在 {} 上打开 App 资源库（{}×{}）", "Opening the App Library on {} ({}×{})"),
                     d.device_name, d.width, d.height
                 ));
             }
             launcher::toggle(rect);
         }
-        None => ui_log("没有可用的显示器，先点「刷新显示器」"),
+        None => ui_log(tr("没有可用的显示器，先点「刷新显示器」", "No display available; click \"Refresh displays\" first")),
     }
 }
 
@@ -1569,7 +1724,7 @@ fn restore_session_windows() {
         });
     let n = apps::restore_saved_places(vrect);
     if n > 0 {
-        ui_log(&format!("已把 {n} 个窗口恢复到远程开始前的尺寸与位置"));
+        ui_log(&format!(tr("已把 {n} 个窗口恢复到远程开始前的尺寸与位置", "Restored {n} window(s) to the size and position from before the remote session")));
     }
 }
 
@@ -1739,7 +1894,7 @@ unsafe extern "system" fn main_wnd_proc(
             let lbl_phone = mk_control(
                 hwnd,
                 "Static",
-                "手机屏",
+                tr("手机屏", "Phone screen"),
                 base,
                 0,
                 0,
@@ -1751,7 +1906,7 @@ unsafe extern "system" fn main_wnd_proc(
             let btn_create = mk_control(
                 hwnd,
                 "Button",
-                "创建手机屏",
+                tr("创建手机屏", "Create phone screen"),
                 btn_style,
                 0,
                 0,
@@ -1763,7 +1918,7 @@ unsafe extern "system" fn main_wnd_proc(
             let btn_remove = mk_control(
                 hwnd,
                 "Button",
-                "移除手机屏",
+                tr("移除手机屏", "Remove phone screen"),
                 btn_style,
                 0,
                 0,
@@ -1775,7 +1930,7 @@ unsafe extern "system" fn main_wnd_proc(
             let phone_hint = mk_control(
                 hwnd,
                 "Static",
-                "向日葵中增加一块竖屏；移除会禁用驱动，创建时重新启用",
+                tr("向日葵中增加一块竖屏；移除会禁用驱动，创建时重新启用", "Adds a portrait screen for Sunlogin; removal disables the driver, creating re-enables it"),
                 base,
                 0,
                 0,
@@ -1787,7 +1942,7 @@ unsafe extern "system" fn main_wnd_proc(
             let model_label = mk_control(
                 hwnd,
                 "Static",
-                "手机型号",
+                tr("手机型号", "Phone model"),
                 base,
                 0,
                 0,
@@ -1809,7 +1964,7 @@ unsafe extern "system" fn main_wnd_proc(
                 ui_font,
             );
             for m in phones::catalog() {
-                let name_w = display::wide(&m.id);
+                let name_w = display::wide(&phones::display_name(&m.id));
                 unsafe {
                     SendMessageW(
                         combo_model,
@@ -1826,10 +1981,42 @@ unsafe extern "system" fn main_wnd_proc(
             unsafe {
                 SendMessageW(combo_model, CB_SETCURSEL, Some(WPARAM(sel)), None);
             }
+            // 右上角语言选择：两项各用自己的语言写（惯例），切换即整窗换文案
+            let combo_lang = mk_control(
+                hwnd,
+                "ComboBox",
+                "",
+                base | WS_VSCROLL | WINDOW_STYLE(0x0003), // CBS_DROPDOWNLIST
+                0,
+                0,
+                10,
+                10,
+                ID_LANG,
+                ui_font,
+            );
+            for name in ["简体中文", "English"] {
+                let name_w = display::wide(name);
+                unsafe {
+                    SendMessageW(
+                        combo_lang,
+                        CB_ADDSTRING,
+                        None,
+                        Some(LPARAM(name_w.as_ptr() as isize)),
+                    );
+                }
+            }
+            unsafe {
+                SendMessageW(
+                    combo_lang,
+                    CB_SETCURSEL,
+                    Some(WPARAM(if saved.english { 1 } else { 0 })),
+                    None,
+                );
+            }
             let radio_auto = mk_control(
                 hwnd,
                 "Button",
-                "自动：主控连入建屏并打开资源库，断开删屏",
+                tr("自动：主控连入建屏并打开资源库，断开删屏", "Auto: create the screen and open the app library on connect, remove on disconnect"),
                 base | WS_GROUP | WINDOW_STYLE(0x0009), // BS_AUTORADIOBUTTON
                 0,
                 0,
@@ -1841,7 +2028,7 @@ unsafe extern "system" fn main_wnd_proc(
             let radio_manual = mk_control(
                 hwnd,
                 "Button",
-                "手动：用上面的按钮建屏、删屏",
+                tr("手动：用上面的按钮建屏、删屏", "Manual: use the buttons above to create/remove the screen"),
                 base | WINDOW_STYLE(0x0009), // BS_AUTORADIOBUTTON
                 0,
                 0,
@@ -1865,7 +2052,7 @@ unsafe extern "system" fn main_wnd_proc(
             let btn_refresh = mk_control(
                 hwnd,
                 "Button",
-                "刷新显示器",
+                tr("刷新显示器", "Refresh displays"),
                 btn_style,
                 0,
                 0,
@@ -1920,6 +2107,7 @@ unsafe extern "system" fn main_wnd_proc(
                     lbl_phone,
                     card_phone: (0, 0, 0, 0),
                     combo_model,
+                    combo_lang,
                     radio_auto,
                     radio_manual,
                     model_label,
@@ -1947,21 +2135,21 @@ unsafe extern "system" fn main_wnd_proc(
             }
             layout_controls(rc.right - rc.left, rc.bottom - rc.top);
             ui_log(&format!(
-                "Snug for Sunlogin — Windows 版 v{}（Rust）",
+                tr("Snug for Sunlogin — Windows 版 v{}（Rust）", "Snug for Sunlogin — Windows Edition v{} (Rust)"),
                 env!("SNUG_VERSION")
             ));
-            ui_log(&format!("日志文件：{}", log::dir().join("snug-windows.log").display()));
-            ui_log("范围：只做虚拟屏与串流测试，不做手势翻译");
+            ui_log(&format!(tr("日志文件：{}", "Log file: {}"), log::dir().join("snug-windows.log").display()));
+            ui_log(tr("范围：只做虚拟屏与串流测试，不做手势翻译", "Scope: virtual screen and streaming tests only; no gesture translation"));
             refresh_displays();
             let (sw, sh, shz) = phones::current_spec();
             ui_log(&format!(
-                "手机型号：{}（虚拟屏 {}×{}@{}）",
-                model.id, sw, sh, shz
+                tr("手机型号：{}（虚拟屏 {}×{}@{}）", "Phone model: {} (virtual screen {}×{}@{})"),
+                phones::display_name(&model.id), sw, sh, shz
             ));
             ui_log(if saved.auto_create {
-                "自动建屏：开（盯 desktopagent 进程，主控连入自动创建、断开自动移除）"
+                tr("自动建屏：开（盯 desktopagent 进程，主控连入自动创建、断开自动移除）", "Auto-create: ON (watches the desktopagent process; creates on connect, removes on disconnect)")
             } else {
-                "自动建屏：关"
+                tr("自动建屏：关", "Auto-create: OFF")
             });
             install_advanced_menu(hwnd);
             // 单选钮在创建时就擦过一次背景，那时卡片位置还没定，主题控件代画父背景
@@ -1973,14 +2161,14 @@ unsafe extern "system" fn main_wnd_proc(
                 RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN,
             );
             ui_log(if saved.only_virtual {
-                "高级模式：连入时仅输出虚拟屏（在左上角图标菜单的「高级模式」里可关）"
+                tr("高级模式：连入时仅输出虚拟屏（在左上角图标菜单的「高级模式」里可关）", "Advanced: virtual screen only while connected (turn it off under \"Advanced\" in the top-left icon menu)")
             } else {
-                "高级模式：关（左上角图标菜单的「高级模式」里可开「连入时仅输出虚拟屏」）"
+                tr("高级模式：关（左上角图标菜单的「高级模式」里可开「连入时仅输出虚拟屏」）", "Advanced: OFF (enable \"Virtual screen only while connected\" under \"Advanced\" in the top-left icon menu)")
             });
             // 异常退出兜底：上次把物理屏关了没恢复（标记还在），先恢复再干别的
             if vdd::load_state().physical_off {
-                ui_log("检测到上次物理屏未恢复（程序可能异常退出），立即恢复…");
-                restore_physicals_if_off("启动自检");
+                ui_log(tr("检测到上次物理屏未恢复（程序可能异常退出），立即恢复…", "The physical displays were left off last time (the app may have exited abnormally); restoring now…"));
+                restore_physicals_if_off(tr("启动自检", "startup check"));
             }
             session::spawn(hwnd.0 as usize);
             // 资源库的「全部」数据先在后台扫好缓存，用户点开时直接用，
@@ -1999,8 +2187,8 @@ unsafe extern "system" fn main_wnd_proc(
                         .map(|s| (s.status, s.detail))
                         .unwrap_or_default()
                 });
-                set_text(status_h, "驱动检测中…");
-                set_text(detail_h, "正在确认虚拟显示驱动（MttVDD）是否就绪");
+                set_text(status_h, tr("驱动检测中…", "Checking the driver…"));
+                set_text(detail_h, tr("正在确认虚拟显示驱动（MttVDD）是否就绪", "Checking whether the virtual display driver (MttVDD) is ready"));
                 spawn_driver_check(hwnd.0 as usize);
             }
             LRESULT(0)
@@ -2191,7 +2379,7 @@ unsafe extern "system" fn main_wnd_proc(
             LRESULT(0)
         }
         session::WM_SESSION_START => {
-            ui_log("检测到向日葵主控连入（desktopagent 进程已启动）");
+            ui_log(tr("检测到向日葵主控连入（desktopagent 进程已启动）", "Sunlogin controller connected (desktopagent process started)"));
             // 先给所有窗口拍一张「远程前」的快照：期间被改过的尺寸，断开时照此还原
             apps::snapshot_all_windows();
             let (auto, has_virtual) = MAIN.with(|c| {
@@ -2202,7 +2390,7 @@ unsafe extern "system" fn main_wnd_proc(
             });
             if auto {
                 if !has_virtual {
-                    ui_log("自动创建手机屏…");
+                    ui_log(tr("自动创建手机屏…", "Auto-creating the phone screen…"));
                     set_screen_owner(true);
                     create_phone_screen();
                 }
@@ -2218,18 +2406,18 @@ unsafe extern "system" fn main_wnd_proc(
             });
             if only_virtual {
                 if display::list().iter().any(|d| d.is_virtual()) {
-                    turn_off_physicals("主控连入");
+                    turn_off_physicals(tr("主控连入", "controller connected"));
                 } else {
-                    ui_log("仅输出虚拟屏：虚拟屏未就绪，暂不关物理屏");
+                    ui_log(tr("仅输出虚拟屏：虚拟屏未就绪，暂不关物理屏", "Virtual screen only: the virtual screen is not ready; not turning off the physical displays yet"));
                 }
             }
             LRESULT(0)
         }
         session::WM_SESSION_END => {
-            ui_log("向日葵主控已断开（desktopagent 进程已退出）");
+            ui_log(tr("向日葵主控已断开（desktopagent 进程已退出）", "Sunlogin controller disconnected (desktopagent process exited)"));
             // 物理屏恢复放在最前面且不设条件：只要是本应用关的就先恢复，
             // 后面的拆屏/还原流程再出什么问题也不能把用户留在无物理屏状态
-            restore_physicals_if_off("主控断开");
+            restore_physicals_if_off(tr("主控断开", "controller disconnected"));
             // 虚拟屏在不在用新鲜枚举判：状态里的那份是上次刷新留下的缓存，
             // 拿它决定拆不拆，缓存一旧就会拆漏
             let has_virtual = display::list().iter().any(|d| d.is_virtual());
@@ -2241,7 +2429,7 @@ unsafe extern "system" fn main_wnd_proc(
             });
             // 只拆自动建的：手动建的屏留给用户自己决定
             if auto && owned {
-                ui_log("自动关闭资源库并还原窗口…");
+                ui_log(tr("自动关闭资源库并还原窗口…", "Auto-closing the app library and restoring windows…"));
                 launcher::close_all();
                 // 先还原窗口再拆屏：屏一拆，留在上面的窗口会被系统胡乱塞位置。
                 // 还原不以「虚拟屏还在」为门：向日葵会在会话结束时先把虚拟屏摘出
@@ -2251,14 +2439,14 @@ unsafe extern "system" fn main_wnd_proc(
                 if has_virtual {
                     remove_phone_screen();
                 } else {
-                    ui_log("虚拟屏已被向日葵摘除，跳过拆屏");
+                    ui_log(tr("虚拟屏已被向日葵摘除，跳过拆屏", "The virtual screen was already removed by Sunlogin; skipping removal"));
                 }
                 set_screen_owner(false);
             } else {
                 // 不拆也要把三个条件的值打出来，下次一看日志就知道卡在哪个条件
-                let yn = |b: bool| if b { "是" } else { "否" };
+                let yn = |b: bool| if b { tr("是", "yes") } else { tr("否", "no") };
                 ui_log(&format!(
-                    "主控已断开，但不自动拆屏（自动模式={}，本屏为自动建={}，虚拟屏在={}）",
+                    tr("主控已断开，但不自动拆屏（自动模式={}，本屏为自动建={}，虚拟屏在={}）", "Controller disconnected, but not removing the screen (auto mode={}, this screen was auto-created={}, virtual screen present={})"),
                     yn(auto),
                     yn(owned),
                     yn(has_virtual)
@@ -2270,9 +2458,9 @@ unsafe extern "system" fn main_wnd_proc(
         WM_DRIVER_CHECKED => {
             refresh_displays();
             if wparam.0 == 1 {
-                ui_log("驱动检测：MttVDD 已就绪");
+                ui_log(tr("驱动检测：MttVDD 已就绪", "Driver check: MttVDD is ready"));
             } else {
-                ui_log("驱动检测：没找到 MttVDD 设备，自动打开配置向导");
+                ui_log(tr("驱动检测：没找到 MttVDD 设备，自动打开配置向导", "Driver check: no MttVDD device found; opening the setup wizard"));
                 guide::open(hwnd);
             }
             LRESULT(0)
@@ -2280,12 +2468,12 @@ unsafe extern "system" fn main_wnd_proc(
         update::WM_UPDATE_AVAILABLE => {
             if let Some(latest) = update::take_pending() {
                 let text = format!(
-                    "发现新版本 v{}（当前 v{}）。\n\n现在下载并更新吗？下载完程序会重启一次完成替换。",
+                    tr("发现新版本 v{}（当前 v{}）。\n\n现在下载并更新吗？下载完程序会重启一次完成替换。", "A new version v{} is available (current v{}).\n\nDownload and update now? The app restarts once to finish the replacement."),
                     latest.version,
                     update::current_version()
                 );
                 let text_w = display::wide(&text);
-                let cap_w = display::wide("SnugWindows 更新");
+                let cap_w = display::wide(tr("SnugWindows 更新", "SnugWindows Update"));
                 let yes = unsafe {
                     MessageBoxW(
                         Some(hwnd),
@@ -2295,31 +2483,31 @@ unsafe extern "system" fn main_wnd_proc(
                     )
                 };
                 if yes == IDYES {
-                    ui_log(&format!("开始下载更新 v{}…", latest.version));
+                    ui_log(&format!(tr("开始下载更新 v{}…", "Downloading update v{}…"), latest.version));
                     update::spawn_prepare(hwnd.0 as usize, latest);
                 } else {
-                    ui_log("已取消更新（下次启动或点「检查更新」还会再问）");
+                    ui_log(tr("已取消更新（下次启动或点「检查更新」还会再问）", "Update cancelled (you will be asked again at next startup or via Check for updates)"));
                 }
             }
             LRESULT(0)
         }
         update::WM_UPDATE_NONE => {
-            ui_log(&format!("已是最新版（v{}）", update::current_version()));
+            ui_log(&format!(tr("已是最新版（v{}）", "Already up to date (v{})"), update::current_version()));
             LRESULT(0)
         }
         update::WM_UPDATE_FAILED => {
             if let Some(e) = update::take_failure() {
-                ui_log(&format!("更新没成：{e}"));
+                ui_log(&format!(tr("更新没成：{e}", "Update failed: {e}")));
             }
             LRESULT(0)
         }
         update::WM_UPDATE_READY => {
-            ui_log("新版已下载并验好，正在重启完成更新…");
+            ui_log(tr("新版已下载并验好，正在重启完成更新…", "The new version is downloaded and verified; restarting to finish the update…"));
             match update::launch_swap() {
                 Ok(()) => unsafe {
                     let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
                 },
-                Err(e) => ui_log(&format!("更新没成：{e}")),
+                Err(e) => ui_log(&format!(tr("更新没成：{e}", "Update failed: {e}"))),
             }
             LRESULT(0)
         }
@@ -2356,6 +2544,7 @@ unsafe extern "system" fn main_wnd_proc(
                     remove_phone_screen();
                 }
                 ID_MODEL if notify == 1 => on_model_changed(), // 1 = CBN_SELCHANGE
+                ID_LANG if notify == 1 => on_lang_changed(hwnd), // 1 = CBN_SELCHANGE
                 ID_MODE_AUTO => {
                     apply_auto_setting(true);
                     relayout(hwnd);
@@ -2370,7 +2559,7 @@ unsafe extern "system" fn main_wnd_proc(
         }
         WM_DESTROY => {
             // 退出前同样兜底：物理屏关着就先恢复（正常断开时 END 已恢复，这里是保险）
-            restore_physicals_if_off("程序退出");
+            restore_physicals_if_off(tr("程序退出", "app exit"));
             testwin::close();
             launcher::close_all();
             unsafe {

@@ -61,6 +61,31 @@ fn parse_catalog(json: &str) -> Option<Vec<PhoneModel>> {
     Some(out)
 }
 
+/// 型号的显示名：存的 id 不变（与 Mac 版共用一份数据），英文界面下
+/// 只在显示时把中文品牌与「内屏/外屏」换成英文。
+pub fn display_name(id: &str) -> String {
+    if !crate::lang::is_en() {
+        return id.to_string();
+    }
+    const BRANDS: [(&str, &str); 10] = [
+        ("华为", "Huawei"),
+        ("小米", "Xiaomi"),
+        ("荣耀", "HONOR"),
+        ("一加", "OnePlus"),
+        ("三星", "Samsung"),
+        ("魅族", "Meizu"),
+        ("努比亚", "nubia"),
+        ("红魔", "RedMagic"),
+        ("内屏", "Inner screen"),
+        ("外屏", "Outer screen"),
+    ];
+    let mut s = id.to_string();
+    for (zh, en) in BRANDS {
+        s = s.replace(zh, en);
+    }
+    s
+}
+
 pub fn model_by_id(id: &str) -> Option<PhoneModel> {
     catalog().iter().find(|m| m.id == id).cloned()
 }
