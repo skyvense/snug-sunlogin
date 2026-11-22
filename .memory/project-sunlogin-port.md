@@ -199,3 +199,10 @@ metadata:
 - 实测（ThinkBook，exe sha256 36a3db73…）：启动 14:04:58 预热、14:05:00 连入自动打开即「数据来自缓存，备数据 0 ms」；14:05:57 点悬浮图标重开同样 0 ms、约 1 秒内截图已见列表全屏。原全量扫描在后台线程约 2 秒量级（246 个 App）。
 - 部署插曲（取证后才定论）：SnugWindows-new.exe 这个文件名经 awesun 文件通道上传后在被控端「不存在」（同文件换名 SnugWindows-test9.exe 上传/回读哈希都正常，原因未明，疑似主控端文件服务对该路径的负缓存）；今后部署一律换新文件名并回读验哈希。deploy3.ps1（杀进程+setprim2 恢复 orig 布局+换 exe+启动，一次提权）已把主屏布局恢复原样（物理 (0,0) 主屏、虚拟屏 (1920,0)），14:06 断开后状态核验干净（physical_off=0）。
 - 注意：机主 13:55 前后自己在用这台机器（型号已由他切到 Galaxy Z Fold8 外屏 1080×1706、only_virtual 仍开），测试勿动其设置。
+
+## 2026-11-22 下午续二 · 多语言（中/英）+ 机主放行发版
+
+- 机主 14:26 拍板发版，并要求加多语言：主窗口右上角语言选择（简体中文 / English），界面、日志、向导都要多语言。范围：Windows 版（Mac 版未动）。
+- 实现：新增 lang.rs——全局 AtomicBool + tr(zh, en) 取词；带插值的走 tr_fmt! 宏（format! 要求字面量格式串，宏内按语言分发到两条 format!，参数只写一遍、命名捕获 {name} 两边都要保留——ccd 复查日志曾因英文模板把 {still_on} 写成 {} 编译失败一次）。settings 增 english=0/1 持久化，启动即按它设语言。主窗口右上角 CBS_DROPDOWNLIST（ID_LANG=1010），切换即时生效：静态文案/标题/列表列头/型号下拉（display_name 英文替换品牌名：三星→Samsung、内屏→Inner screen 等，存的 id 仍是中文原名与 Mac 共用）/系统菜单（GetSystemMenu 还原后重装高级菜单）/列表刷新全量重绘；启动器与向导在打开/绘制时取词，下次打开即新语言。覆盖：main 161 对、launcher 31、guide 45、后端 ccd/vdd/devices/display/scale/session/testwin/update 约 100；apps.rs 的中文是常用 App 匹配键（数据）不译。英文文案收短一轮（单选/标签按中文宽度排版，长句会被裁）：Model、Auto: create on connect, remove on disconnect、Manual: use the buttons above。
+- 实测（ThinkBook SnugTest3，构建 087a5af，exe sha256 89d4101f…，机上哈希核对一致）：下拉点选 English → 主窗口标题/状态/列头/型号（Samsung Galaxy Z Fold8 Outer screen）/单选/菜单（Advanced 子菜单三项）全英文，新日志行英文；重启后按 english=1 从首行起英文；--guide 打开向导全英文（标题/五步/按钮 Next/Close）；连入后启动器全英文（Search apps、Running/All、8 win、Common · Not open）；切回后 settings 落盘 english=0、界面与启动器恢复中文。强杀恢复兜底顺带在野复测一次：phase7 强杀关屏中的旧实例，新实例启动自检走存盘拓扑恢复成功。
+- 现场注意：接手时 only_virtual 已是关——机主上午自测后自己关掉的（14:04 日志还是开、14:42 变关，期间只有他在用），测试全程未动其设置，最终原样交回（only_virtual=0、english=0、Fold8 外屏、自动模式）。awesun-cli 的鼠标 click 对系统菜单项不可靠（点了不关菜单），菜单类操作改走 settings 文件 + 会话重连验证。
