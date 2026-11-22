@@ -8,6 +8,12 @@ import SnugCore
 enum Renderer {
     /// 返回是否全部渲染成功
     static func run(_ target: RenderTarget, output dir: URL) -> Bool {
+        // 渲染时选语言（CI 上中英各渲一套对照）：SNUG_RENDER_LANG=en / zh；不设就是中文
+        switch ProcessInfo.processInfo.environment["SNUG_RENDER_LANG"] {
+        case "en": Lang.apply(.en)
+        case "zh": Lang.apply(.zh)
+        default: break
+        }
         NSApplication.shared.setActivationPolicy(.prohibited)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

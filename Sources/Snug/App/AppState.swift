@@ -15,8 +15,9 @@ enum ConnectionPhase: Equatable {
 @Observable
 final class AppState {
     var config = AppConfig()
-    /// 界面实际显示英文与否（由 config.language + 系统语言算出，AppController 维护；界面取词读它，见 Lang）
-    var english = false
+    /// 界面实际显示英文与否（由 config.language + 系统语言算出，AppController 维护；界面取词读它，见 Lang）。
+    /// 默认取 Lang 当前值：渲染样例先 apply 再建状态，样例就跟着走；正常启动时 AppController 建完控制器再对齐
+    var english = Lang.english
     /// 机型库（启动时读一次）：设置和手机屏上选手机型号用
     var phones = PhoneCatalog.empty
     var connection = ConnectionPhase.idle
