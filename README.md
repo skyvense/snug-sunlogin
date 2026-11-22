@@ -29,6 +29,24 @@ Snug · 向日葵版在被控电脑上创建一块与手机同比例的竖屏（
 
 **Windows 版已在真实 Windows 11 机器上实测**：虚拟屏创建/移除与 App 资源库可用；v2.6.5 修复了「向日葵断开后虚拟屏建不回来」的问题（向日葵会在会话结束时把虚拟屏从显示拓扑里摘掉，本版在建屏时自动把它重新激活），经多轮连接/断开实测稳定。手机串流的系统性体验测试还在进行中（清单见 `windows/SPIKE.md`）。
 
+## 截图
+
+Windows 版主窗口（被控机上运行，手机屏已就绪）：
+
+<img src="docs/images/windows-main.png" width="560" alt="Windows 版主窗口">
+
+手机屏上的 App 资源库（Windows 版，点任意 App 全屏到手机屏）：
+
+<img src="docs/images/windows-launcher.png" width="380" alt="Windows 版 App 资源库">
+
+macOS 版设置窗口：
+
+<img src="docs/images/mac-settings.png" width="560" alt="macOS 版设置窗口">
+
+手机屏上的 App 资源库（macOS 版）：
+
+<img src="docs/images/mac-phone.png" width="380" alt="macOS 版 App 资源库">
+
 ## 下载与安装
 
 两个平台的包都在同一个 [Releases](https://github.com/skyvense/snug-sunlogin/releases) 页面，版本号一致。
