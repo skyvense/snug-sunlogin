@@ -386,7 +386,52 @@ pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
 /// 索引失效的按「借同源/同目标历史模式 → 按源尺寸现造 60Hz」顺序补。
 /// 位置统一重排：物理屏从 (0,0) 向右，VDD 在场时排最右。应用时存盘，
 /// 把持久化拓扑一并修回正常状态（向日葵摘 VDD 的存盘改动由建屏阶梯另行处理）。
+/// 恢复物理屏：先走路径手术（补模式、激活、重排位置）；手术未生效时整体套用
+/// 存盘拓扑兜底——关物理屏从不存盘，存盘拓扑里物理屏必然是开的。
 pub fn restore_physicals() -> Result<PhysicalOutcome, String> {
+    let mut out = match restore_physicals_surgery() {
+        Ok(o) if o.applied || o.changed == 0 => return Ok(o),
+        Ok(o) => o,
+        Err(e) => PhysicalOutcome {
+            applied: false,
+            changed: 1,
+            notes: vec![format!("路径手术失败：{e}")],
+        },
+    };
+    out.notes.push("改用存盘拓扑整体恢复".to_string());
+    if let Err(fe) = apply_database_config(&mut out) {
+        return Err(format!(
+            "{fe}；路径手术同样未生效：{}",
+            out.notes.join("；")
+        ));
+    }
+    Ok(out)
+}
+
+/// 整体套用存盘拓扑（SDC_USE_DATABASE_CURRENT）。2026-11-22 实测：强杀进程后
+/// 重启，路径手术因物理屏源模式缺失且无处可借而失败，此法返回 0、物理屏恢复。
+fn apply_database_config(out: &mut PhysicalOutcome) -> Result<(), String> {
+    let rc = unsafe { SetDisplayConfig(None, None, SDC_APPLY | SDC_USE_DATABASE_CURRENT) };
+    out.notes
+        .push(format!("套用存盘拓扑：SetDisplayConfig 返回 {rc}（0 = 成功）"));
+    if rc != 0 {
+        return Err(format!("套用存盘拓扑失败（错误码 {rc}）"));
+    }
+    let (paths2, _m) =
+        query_all().map_err(|e| format!("套用存盘拓扑后复查拓扑失败（错误码 {e}）"))?;
+    let any_on = physical_paths(&paths2).iter().any(|(_, _, a)| *a);
+    out.notes.push(format!(
+        "复查：物理屏有激活路径={}",
+        if any_on { "是" } else { "否" }
+    ));
+    if !any_on {
+        return Err("套用存盘拓扑后物理屏仍未激活".to_string());
+    }
+    out.applied = true;
+    Ok(())
+}
+
+fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
     let (mut paths, mut modes) =
         query_all().map_err(|e| format!("查询显示拓扑失败（错误码 {e}）"))?;
     let mut out = PhysicalOutcome {
