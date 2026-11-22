@@ -184,3 +184,10 @@ metadata:
 - 修复二带出的崩溃（584cbc9）：断开时拓扑变化触发 DPICHANGED，apply_fonts 在 borrow_mut 里 SendMessageW(WM_SETFONT)，控件同步重绘使父窗口重入 WM_CTLCOLORSTATIC 借 MAIN → RefCell already mutably borrowed，在 extern "system" 回调里 panic = 进程中止（12:36:19 实测崩，幸物理屏已先恢复、physical_off=0）。改法：借用内只换字体存句柄，释放后按快照发 WM_SETFONT 与列宽。同路径复测（12:40:31）：断开恢复完成、进程存活、无新 PANIC。
 - 现状：分支头 584cbc9（exe sha256 6c837ed3…，已装 ThinkBook SnugTest3 运行中），仍未合并未发版，等机主决定。机主设置保留其原样（only_virtual=1、Galaxy Z Flip8）。
 - 附带发现：ThinkBook 系统时钟今天多次跳变（日志时间戳出现逆序，如 12:35 的行排在 12:34 之前），排查时序时别全信时间戳；另 12:33 前后有一段旧构建（v2.6.4/测试版 v0.1.0 字样）的日志混入同一日志文件，来源未查明（疑似桌面快捷方式的旧副本被启动过），不影响当前结论。
+
+## 2026-11-22 下午 · 资源库连入置顶（055d37f，同分支续）
+
+- 机主要求：向日葵刚连上时虚拟屏上的资源库窗口要置顶。实现：launcher::raise()（SetWindowPos HWND_TOP + SetForegroundWindow），在 open() 成功后与 move_to() 末尾各调一次；只做一次性提位不挂 TOPMOST（点选 App 后资源库会关，长期置顶反而挡被打开的窗口）。构建已部署 ThinkBook SnugTest3（sha256 b55da642…）。
+- 验证（部分）：会话 12 连入后资源库在虚拟屏全屏置顶，桌面上 firefox/chrome/explorer（8 窗）/Settings 等都在运行列表里、无一盖住资源库（截图 report-launcher-topmost.png）。更严的「应用全屏在虚拟屏时重连、资源库重新盖上」复测没跑完：awesun-cli 桌面会话自 13:07 起频繁秒断、命令通道间歇无响应（本日十余轮会话+拓扑翻转后主控端状态劣化），非 Snug 问题——Snug 日志显示每轮连入/关屏/对齐/断开恢复都正确执行。
+- 测试坑（重要）：未批的 UAC 提示会挂在安全桌面上，后果连环——桌面串流秒断、且 Snug 的关物理屏 SetDisplayConfig 返回 5（访问被拒，应用正确地保持原样并打了警告）。本日 13:07/13:09 两次关屏失败皆源于此（kill.ps1 的 RunAs 叠了两个没批）。教训：RunAs 脚本只在有活会话能立刻批时才发；发完必须确认批掉。
+- 遗留现场：为拍虚拟屏原生截图用 setprim2 把主屏换到虚拟屏（phone 布局，已存盘），恢复脚本 setprim2 -layout orig 的 UAC 还挂在 ThinkBook 控制台上没批成（串流秒断批不了）——已请机主在本机点「是」恢复原布局（物理屏回主屏）；若点了「否」需另行处理。当前拓扑：虚拟屏 (0,0) 主屏、物理屏 (-1920,0)，双屏都开着，Snug 运行中，设置仍是机主的（only_virtual 开、Flip8）。
