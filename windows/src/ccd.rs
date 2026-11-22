@@ -296,7 +296,7 @@ fn find_mode(
 /// 应用时故意不存盘（不带 SDC_SAVE_TO_DATABASE）：持久化拓扑里物理屏仍是开的，
 /// 万一程序异常退出，下次开机物理屏自动回来——这是最后一道保险。
 pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
-    let (mut paths, modes) =
+    let (mut paths, mut modes) =
         query_all().map_err(|e| format!("查询显示拓扑失败（错误码 {e}）"))?;
     let mut out = PhysicalOutcome {
         applied: false,
@@ -329,6 +329,25 @@ pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
     if out.changed == 0 {
         out.notes.push("没有处于开启状态的物理屏，无需处理".to_string());
         return Ok(out);
+    }
+    // 关掉物理屏后，剩下的虚拟屏必须顶到原点 (0,0)：SetDisplayConfig 要求至少
+    // 一条激活路径的源在原点（主屏位置），否则返回 87 参数错误（2026-11-22 实测：
+    // 物理屏在 (0,0)、虚拟屏在 (1920,0) 时直接关物理屏必失败）。
+    match paths.iter().position(|p| {
+        let (friendly, devpath) = target_name(p);
+        is_vdd_target(&friendly, &devpath) && p.flags & PATH_ACTIVE != 0
+    }) {
+        Some(vdd_idx) => {
+            let smi = unsafe { paths[vdd_idx].sourceInfo.Anonymous.modeInfoIdx };
+            if smi == MODE_IDX_INVALID {
+                return Err("虚拟屏的源模式索引失效，放弃关物理屏".to_string());
+            }
+            if let Some(m) = modes.get_mut(smi as usize) {
+                m.Anonymous.sourceMode.position = POINTL { x: 0, y: 0 };
+                out.notes.push("虚拟屏源位置移到 (0,0) 顶替主屏".to_string());
+            }
+        }
+        None => return Err("关物理屏前复查不到激活的虚拟屏路径，放弃".to_string()),
     }
     let rc = unsafe {
         SetDisplayConfig(
