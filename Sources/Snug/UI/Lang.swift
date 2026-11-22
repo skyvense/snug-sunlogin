@@ -6,10 +6,9 @@
 // 菜单、状态文案等非界面代码读 Lang.tr（同一份结果的静态镜像）
 import SnugCore
 
-@MainActor
 enum Lang {
-    /// 当前实际显示英文与否（apply 维护）
-    static private(set) var english = false
+    /// 当前实际显示英文与否（apply 维护；只在主线程写，读遍布各处，故不做隔离）
+    nonisolated(unsafe) static private(set) var english = false
 
     /// 系统首选语言是不是中文（跟随系统时用它定）
     static var systemIsChinese: Bool {

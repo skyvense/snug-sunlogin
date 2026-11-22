@@ -33,7 +33,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func refreshButton() {
         withObservationTracking {
             item.button?.appearsDisabled = !state.config.phoneScreen || !state.accessibilityTrusted
-            item.button?.toolTip = "Snug：\(StatusText(state).headline)"
+            item.button?.toolTip = Lang.tr("Snug：", "Snug: ") + StatusText(state).headline
         } onChange: { [weak self] in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.refreshButton() } }
         }
@@ -42,15 +42,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         menu.addItem(status())
-        if state.legacyAppRunning { menu.addItem(action("退出旧版 UU远程伴侣", #selector(quitLegacy), symbol: "xmark.circle")) }
+        if state.legacyAppRunning { menu.addItem(action(Lang.tr("退出旧版 UU远程伴侣", "Quit Legacy UU Remote Companion"), #selector(quitLegacy), symbol: "xmark.circle")) }
         menu.addItem(.separator())
-        menu.addItem(action("设置…", #selector(openSettings), key: ",", symbol: "gearshape"))
-        let about = action("关于 Snug", #selector(openAbout), symbol: "info.circle")
+        menu.addItem(action(Lang.tr("设置…", "Settings…"), #selector(openSettings), key: ",", symbol: "gearshape"))
+        let about = action(Lang.tr("关于 Snug", "About Snug"), #selector(openAbout), symbol: "info.circle")
         // 有新版本：系统的菜单角标，更新在「关于」页里
-        if state.update.hasNewVersion { about.badge = NSMenuItemBadge(string: "新版本") }
+        if state.update.hasNewVersion { about.badge = NSMenuItemBadge(string: Lang.tr("新版本", "New Version")) }
         menu.addItem(about)
         menu.addItem(.separator())
-        menu.addItem(action("退出 Snug", #selector(quit), key: "q", symbol: "power"))
+        menu.addItem(action(Lang.tr("退出 Snug", "Quit Snug"), #selector(quit), key: "q", symbol: "power"))
     }
 
     /// 最上面一行：状态圆点 + 此刻的状态和一行说明。只看不点，所以用自定义视图（不会高亮）

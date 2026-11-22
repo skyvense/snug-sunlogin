@@ -21,26 +21,26 @@ struct SettingsView: View {
             }
             Section {
                 Toggle(isOn: binding(\.config.phoneScreen, intents.setPhoneScreen)) {
-                    SettingLabel("手机屏", detail: "向日葵 中增加竖屏", symbol: "iphone", tint: .blue)
+                    SettingLabel(state.tr("手机屏", "Phone Screen"), detail: state.tr("向日葵 中增加竖屏", "Adds a portrait screen in Sunlogin"), symbol: "iphone", tint: .blue)
                 }
                 LabeledContent {
                     PhoneMenu(state: state, choose: intents.setPhone)
                 } label: {
-                    SettingLabel("手机型号", detail: "手机屏按它调整比例", symbol: "iphone.gen3", tint: .indigo)
+                    SettingLabel(state.tr("手机型号", "Phone Model"), detail: state.tr("手机屏按它调整比例", "The phone screen follows its aspect ratio"), symbol: "iphone.gen3", tint: .indigo)
                 }
                 .disabled(!state.config.phoneScreen)
                 Toggle(isOn: binding(\.config.gestures, intents.setGestures)) {
-                    SettingLabel("触控手势", detail: "向日葵下暂不可用", symbol: "hand.draw.fill", tint: .orange)
+                    SettingLabel(state.tr("触控手势", "Touch Gestures"), detail: state.tr("向日葵下暂不可用", "Not available with Sunlogin yet"), symbol: "hand.draw.fill", tint: .orange)
                 }
                 .disabled(true) // 手势在向日葵下有异常，修好前不让开启（配置层也强制关闭）
                 Toggle(isOn: binding(\.config.screenshot, intents.setScreenshot)) {
-                    SettingLabel("截图", detail: "指示条左侧的相机键 · 截当前窗口到剪贴板", symbol: "camera.viewfinder", tint: .pink)
+                    SettingLabel(state.tr("截图", "Screenshot"), detail: state.tr("指示条左侧的相机键 · 截当前窗口到剪贴板", "Camera button on the bar · Captures the current window to the clipboard"), symbol: "camera.viewfinder", tint: .pink)
                 }
                 .disabled(!state.config.phoneScreen)
                 LabeledContent {
                     ZoomSlider(steps: binding(\.config.zoomSteps, intents.setZoomSteps))
                 } label: {
-                    SettingLabel("字号放大", detail: "终端、编辑器", symbol: "textformat.size", tint: .green)
+                    SettingLabel(state.tr("字号放大", "Text Zoom"), detail: state.tr("终端、编辑器", "Terminals, editors"), symbol: "textformat.size", tint: .green)
                 }
                 .disabled(!state.config.phoneScreen)
                 LabeledContent {
@@ -57,7 +57,7 @@ struct SettingsView: View {
             }
             Section {
                 Toggle(isOn: binding(\.launchAtLogin, intents.setLaunchAtLogin)) {
-                    SettingLabel("开机启动", symbol: "power", tint: .gray)
+                    SettingLabel(state.tr("开机启动", "Launch at Login"), symbol: "power", tint: .gray)
                 }
                 // 没授权时「授权…」在顶部状态（辅助功能）或问题行（录屏）里，这里只写状态
                 LabeledContent {
@@ -75,8 +75,8 @@ struct SettingsView: View {
             } footer: {
                 HStack {
                     Spacer()
-                    Button("退出 Snug") { intents.quit() }
-                        .help("还原窗口后退出")
+                    Button(state.tr("退出 Snug", "Quit Snug")) { intents.quit() }
+                        .help(state.tr("还原窗口后退出", "Restores windows, then quits"))
                 }
                 .padding(.top, 8)
             }
@@ -90,20 +90,20 @@ struct SettingsView: View {
     private var issues: [Issue] {
         var list: [Issue] = []
         if state.legacyAppRunning {
-            list.append(Issue(id: "legacy", text: StatusText(headline: "旧版「UU远程伴侣」运行中", detail: "与 Snug 同时运行将相互干扰"),
-                              action: .run("退出旧版", intents.quitLegacyApp)))
+            list.append(Issue(id: "legacy", text: StatusText(headline: state.tr("旧版「UU远程伴侣」运行中", "The legacy UU Remote Companion is running"), detail: state.tr("与 Snug 同时运行将相互干扰", "Running both at once will interfere with each other")),
+                              action: .run(state.tr("退出旧版", "Quit Legacy App"), intents.quitLegacyApp)))
         }
         if let issue = state.loginItemIssue {
             list.append(Issue(id: "login", text: issue.text,
-                              action: issue == .needsApproval ? .run("前往允许", intents.openLoginItemsSettings) : nil))
+                              action: issue == .needsApproval ? .run(state.tr("前往允许", "Open to Allow"), intents.openLoginItemsSettings) : nil))
         }
         if state.config.phoneScreen, state.config.screenshot, !state.screenRecordingTrusted {
             list.append(Issue(id: "screen-recording",
-                              text: StatusText(headline: "截图需要\(PermissionName.screenRecording)权限", detail: "系统设置 › 隐私与安全性"),
+                              text: StatusText(headline: state.tr("截图需要\(PermissionName.screenRecording)权限", "Screenshots need \(PermissionName.screenRecording) permission"), detail: state.tr("系统设置 › 隐私与安全性", "System Settings › Privacy & Security")),
                               action: .authorize(.screenRecording)))
         }
         if state.configSaveFailed {
-            list.append(Issue(id: "config", text: StatusText(headline: "设置未保存", detail: "修改未生效，请重试"), action: nil))
+            list.append(Issue(id: "config", text: StatusText(headline: state.tr("设置未保存", "Settings not saved"), detail: state.tr("修改未生效，请重试", "Changes didn't take effect — please retry")), action: nil))
         }
         return list
     }
@@ -135,7 +135,7 @@ private struct StatusHeader: View {
             }
             Spacer(minLength: 12)
             if !state.accessibilityTrusted {
-                Button("授权…") { navigation.openWelcome() }
+                Button(state.tr("授权…", "Authorize…")) { navigation.openWelcome() }
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -209,7 +209,7 @@ private struct PhoneMenu: View {
                 }
             }
             if !state.phones.brands.isEmpty { Divider() }
-            Toggle("自定义分辨率…", isOn: Binding(get: { current.model == nil }, set: { _ in customizing = true }))
+            Toggle(state.tr("自定义分辨率…", "Custom Resolution…"), isOn: Binding(get: { current.model == nil }, set: { _ in customizing = true }))
         }
         .fixedSize()
         .popover(isPresented: $customizing, arrowEdge: .bottom) {
@@ -233,20 +233,20 @@ private struct CustomScreenForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("自定义分辨率").font(.headline)
+            Text(state.tr("自定义分辨率", "Custom Resolution")).font(.headline)
             HStack(spacing: 8) {
-                TextField("宽", value: $width, format: .number.grouping(.never))
+                TextField(state.tr("宽", "Width"), value: $width, format: .number.grouping(.never))
                 Text("×").foregroundStyle(.secondary)
-                TextField("高", value: $height, format: .number.grouping(.never))
+                TextField(state.tr("高", "Height"), value: $height, format: .number.grouping(.never))
             }
             .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.center)
             Text(PhoneScreen.customHint).font(.callout).foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("取消") { done(nil) }
+                Button(state.tr("取消", "Cancel")) { done(nil) }
                     .keyboardShortcut(.cancelAction)
-                Button("使用") { done(screen) }
+                Button(state.tr("使用", "Use")) { done(screen) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(screen == nil)
             }
@@ -269,7 +269,7 @@ private struct ZoomSlider: View {
         let range = AppConfig.zoomStepsRange
         Slider(value: Binding(get: { Double(steps) }, set: { steps = Int($0.rounded()) }),
                in: Double(range.lowerBound)...Double(range.upperBound), step: 1) {
-            Text("字号放大")
+            Text(state.tr("字号放大", "Text Zoom"))
         } minimumValueLabel: {
             Image(systemName: "textformat.size.smaller")
         } maximumValueLabel: {
@@ -277,7 +277,7 @@ private struct ZoomSlider: View {
         }
         .labelsHidden()
         .frame(width: 160)
-        .accessibilityValue(steps == 0 ? "不放大" : "+\(steps) 级")
+        .accessibilityValue(steps == 0 ? state.tr("不放大", "Off") : "+\(steps)")
     }
 }
 
@@ -307,9 +307,9 @@ final class SettingsWindowController {
         if window == nil, let navigation {
             let tabs = NSTabViewController()
             tabs.tabStyle = .toolbar
-            tabs.addTabViewItem(Self.item("通用", symbol: "gearshape",
+            tabs.addTabViewItem(Self.item(Lang.tr("通用", "General"), symbol: "gearshape",
                                           SettingsView(state: state, intents: intents, navigation: navigation)))
-            tabs.addTabViewItem(Self.item("关于", symbol: "info.circle",
+            tabs.addTabViewItem(Self.item(Lang.tr("关于", "About"), symbol: "info.circle",
                                           AboutView(state: state, intents: intents, navigation: navigation)))
             // 先选好页再建窗口：窗口按这一页的大小建，居中才是正的
             tabs.selectedTabViewItemIndex = tab.rawValue

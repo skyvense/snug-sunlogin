@@ -41,12 +41,12 @@ struct SettingLabel: View {
 extension SettingLabel {
     /// 辅助功能权限那一行（欢迎页、设置页）
     static var accessibility: SettingLabel {
-        SettingLabel(PermissionName.accessibility, detail: "用于移动窗口与转换手势", symbol: "hand.raised.fill", tint: .indigo)
+        SettingLabel(PermissionName.accessibility, detail: Lang.tr("用于移动窗口与转换手势", "Used to move windows and translate gestures"), symbol: "hand.raised.fill", tint: .indigo)
     }
 
     /// 录屏权限那一行（设置页，开了截图键才有）
     static var screenRecording: SettingLabel {
-        SettingLabel(PermissionName.screenRecording, detail: "用于截图", symbol: "rectangle.dashed.badge.record", tint: .red)
+        SettingLabel(PermissionName.screenRecording, detail: Lang.tr("用于截图", "Used for screenshots"), symbol: "rectangle.dashed.badge.record", tint: .red)
     }
 }
 
@@ -58,10 +58,10 @@ struct PermissionStatus: View {
         if granted {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).imageScale(.small)
-                Text("已授权").foregroundStyle(.secondary)
+                Text(Lang.tr("已授权", "Granted")).foregroundStyle(.secondary)
             }
         } else {
-            Text("未授权").foregroundStyle(.secondary)
+            Text(Lang.tr("未授权", "Not granted")).foregroundStyle(.secondary)
         }
     }
 }
@@ -75,9 +75,9 @@ struct AuthorizeButton: View {
         PermissionFlowButton(
             pane: pane,
             suggestedAppURLs: [app],
-            configuration: .init(requiredAppURLs: [app], promptForAccessibilityTrust: false, localeIdentifier: "zh-Hans")
+            configuration: .init(requiredAppURLs: [app], promptForAccessibilityTrust: false, localeIdentifier: Lang.english ? "en" : "zh-Hans")
         ) { _ in
-            Text("授权…")
+            Text(Lang.tr("授权…", "Authorize…"))
         }
     }
 }
