@@ -22,3 +22,23 @@ pub fn tr(zh: &'static str, en: &'static str) -> &'static str {
         zh
     }
 }
+
+/// 带插值的文案：format! 的格式串必须是字面量，没法直接吃 tr() 的返回值，
+/// 所以按语言分发到两个 format! 上（参数只在调用点写一份，含 {name} 内联捕获）。
+#[macro_export]
+macro_rules! tr_fmt {
+    ($zh:literal, $en:literal) => {
+        if $crate::lang::is_en() {
+            format!($en)
+        } else {
+            format!($zh)
+        }
+    };
+    ($zh:literal, $en:literal, $($rest:tt)*) => {
+        if $crate::lang::is_en() {
+            format!($en, $($rest)*)
+        } else {
+            format!($zh, $($rest)*)
+        }
+    };
+}

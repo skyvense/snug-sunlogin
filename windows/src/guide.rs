@@ -5,6 +5,8 @@
 
 use crate::devices;
 use crate::display::{self, wide};
+use crate::lang::tr;
+use crate::tr_fmt;
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
@@ -144,7 +146,7 @@ pub fn open(parent: HWND) {
             py = prect.top + sc(40);
         }
         let class_w = wide(CLASS_NAME);
-        let title_w = wide("配置向导 — 把虚拟屏一步步搞通");
+        let title_w = wide(tr("配置向导 — 把虚拟屏一步步搞通", "Setup wizard — get the virtual screen working step by step"));
         let _ = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PCWSTR(class_w.as_ptr()),
@@ -270,7 +272,7 @@ fn append_line(line: &str) {
 fn do_check() -> CheckResult {
     let device = match devices::display_adapters() {
         Ok(list) => devices::find_vdd(&list)
-            .map(|d| format!("{}（{}）", d.friendly_name, d.instance_id)),
+            .map(|d| tr_fmt!("{}（{}）", "{} ({})", d.friendly_name, d.instance_id)),
         Err(_) => None,
     };
     let list = display::list();
@@ -301,14 +303,14 @@ fn start_install(hwnd_raw: usize) {
             .with_file_name("setup-virtual-display.ps1");
         if !script.exists() {
             push_log(
-                "exe 旁边没找到 setup-virtual-display.ps1：它与 exe 在同一个发布包里，确认解压完整".to_string(),
+                tr("exe 旁边没找到 setup-virtual-display.ps1：它与 exe 在同一个发布包里，确认解压完整", "setup-virtual-display.ps1 not found next to the exe: it ships in the same release package; make sure the extraction is complete").to_string(),
                 hwnd_raw,
             );
             INBOX.lock().unwrap().install_exit = Some(-1);
             post(hwnd_raw, WM_GUIDE_INSTALL_DONE, 0);
             return;
         }
-        push_log(format!("开始运行 {}", script.display()), hwnd_raw);
+        push_log(tr_fmt!("开始运行 {}", "Running {}", script.display()), hwnd_raw);
         let mut cmd = Command::new("powershell.exe");
         cmd.args([
             "-NoProfile",
@@ -334,7 +336,7 @@ fn start_install(hwnd_raw: usize) {
                 INBOX.lock().unwrap().install_exit = Some(code);
             }
             Err(e) => {
-                push_log(format!("启动安装脚本失败：{e}"), hwnd_raw);
+                push_log(tr_fmt!("启动安装脚本失败：{e}", "Failed to start the install script: {e}"), hwnd_raw);
                 INBOX.lock().unwrap().install_exit = Some(-1);
             }
         }
@@ -385,12 +387,12 @@ fn goto_create() {
         }
     });
     set_text(
-        "第 3 步（共 5 步）：创建手机屏并验证\n\n\
+        tr("第 3 步（共 5 步）：创建手机屏并验证\n\n\
          驱动已经就绪。点下面的按钮，向导会让主程序创建一块手机尺寸的虚拟屏，\
          并确认它真的出现在桌面上。\n\n\
-         创建时屏幕可能会闪一下，属正常现象。",
+         创建时屏幕可能会闪一下，属正常现象。", "Step 3 of 5: Create the phone screen and verify\n\nThe driver is ready. Click the button below and the wizard will have the main app create a phone-sized virtual screen and confirm it really appears on the desktop.\n\nThe screen may flicker briefly while creating; that is normal."),
     );
-    set_action("创建手机屏并验证", true);
+    set_action(tr("创建手机屏并验证", "Create phone screen and verify"), true);
 }
 
 fn goto_remove() {
@@ -404,13 +406,11 @@ fn goto_remove() {
         .find(|d| d.is_virtual() && d.is_phone_mode())
         .map(|d| format!("{}×{}", d.width, d.height))
         .unwrap_or_default();
-    set_text(&format!(
-        "第 4 步（共 5 步）：删除手机屏并验证\n\n\
+    set_text(&tr_fmt!("第 4 步（共 5 步）：删除手机屏并验证\n\n\
          ✓ 手机屏已创建并验证通过（{dims}）。\n\n\
          接着验证删除：点下面的按钮，向导会把这块屏删掉，并确认它真的从桌面上消失。\
-         删不掉的话自动模式断开时也拆不掉，所以这一步必须过。"
-    ));
-    set_action("删除手机屏并验证", true);
+         删不掉的话自动模式断开时也拆不掉，所以这一步必须过。", "Step 4 of 5: Remove the phone screen and verify\n\n✓ The phone screen was created and verified ({dims}).\n\nNext, verify removal: click the button below and the wizard will remove this screen and confirm it really disappears from the desktop. If removal fails here, auto mode cannot remove it on disconnect either, so this step must pass."));
+    set_action(tr("删除手机屏并验证", "Remove phone screen and verify"), true);
 }
 
 fn goto_test() {
@@ -421,13 +421,13 @@ fn goto_test() {
         }
     });
     set_text(
-        "第 5 步（共 5 步）：打开测试画面\n\n\
+        tr("第 5 步（共 5 步）：打开测试画面\n\n\
          ✓ 删除已验证通过。\n\n\
          最后一步：重新创建手机屏，并把串流测试画面铺满它。\
          点下面的按钮之后，用手机打开向日葵连进这块虚拟屏，\
-         看动画顺不顺、帧号跳不跳——顺了就算全程搞通。",
+         看动画顺不顺、帧号跳不跳——顺了就算全程搞通。", "Step 5 of 5: Open the test pattern\n\n✓ Removal verified.\n\nFinal step: recreate the phone screen and fill it with the streaming test pattern. After clicking the button below, open Sunlogin on your phone, connect to this virtual screen, and check whether the animation runs smoothly and the frame counter advances without jumps — if it does, everything works end to end."),
     );
-    set_action("创建并打开测试画面", true);
+    set_action(tr("创建并打开测试画面", "Create and open the test pattern"), true);
 }
 
 fn on_checked() {
@@ -445,36 +445,36 @@ fn on_checked() {
         }
     });
     if let Some(desc) = &r.device {
-        append_line(&format!("✓ 驱动设备已找到：{desc}"));
+        append_line(&tr_fmt!("✓ 驱动设备已找到：{desc}", "✓ Driver device found: {desc}"));
         append_line(if r.phone_now {
-            "✓ 虚拟屏已在桌面上，且是手机尺寸"
+            tr("✓ 虚拟屏已在桌面上，且是手机尺寸", "✓ The virtual screen is on the desktop, at phone size")
         } else if r.virtual_now {
-            "· 虚拟屏已在桌面上（还不是手机尺寸，验证一步会处理）"
+            tr("· 虚拟屏已在桌面上（还不是手机尺寸，验证一步会处理）", "· The virtual screen is on the desktop (not phone size yet; the verify step will handle it)")
         } else {
-            "· 虚拟屏还没出现（验证一步会创建）"
+            tr("· 虚拟屏还没出现（验证一步会创建）", "· The virtual screen has not appeared yet (the verify step will create it)")
         });
         if after_install {
-            append_line("\n安装成功，驱动已经装好了。");
+            append_line(tr("\n安装成功，驱动已经装好了。", "\nInstall succeeded; the driver is in place."));
         }
-        set_action("下一步：创建手机屏", true);
+        set_action(tr("下一步：创建手机屏", "Next: create the phone screen"), true);
     } else {
-        append_line("✗ 没找到虚拟显示驱动设备（MttVDD）");
+        append_line(tr("✗ 没找到虚拟显示驱动设备（MttVDD）", "✗ Virtual display driver device (MttVDD) not found"));
         if after_install {
             append_line(
-                "\n安装跑完了，但还是没找到驱动设备。常见原因：安全软件拦截了驱动安装、\
+                tr("\n安装跑完了，但还是没找到驱动设备。常见原因：安全软件拦截了驱动安装、\
                  系统拒绝了自签名驱动。可以打开安装日志看最后几行：\n\
                  %TEMP%\\..\\setup-virtual-display.log（在安装脚本旁边）\n\
-                 把日志发给懂的人看，或点下面的按钮再装一次。",
+                 把日志发给懂的人看，或点下面的按钮再装一次。", "\nThe install finished, but the driver device is still not found. Common causes: security software blocked the driver installation, or the system rejected the self-signed driver. You can open the install log and read the last few lines:\n%TEMP%\\..\\setup-virtual-display.log (next to the install script)\nShow the log to someone technical, or click the button below to install again."),
             );
-            set_action("重新安装", true);
+            set_action(tr("重新安装", "Reinstall"), true);
         } else {
             append_line(
-                "\n没有这个驱动就变不出虚拟屏。点「开始安装驱动」，向导会自动：\n\
+                tr("\n没有这个驱动就变不出虚拟屏。点「开始安装驱动」，向导会自动：\n\
                  1）导入驱动的签名证书（不导入系统会拒绝这个驱动）\n\
                  2）把驱动装进系统并创建虚拟屏设备\n\
-                 过程约 1–3 分钟，屏幕可能会闪几下，属正常现象。",
+                 过程约 1–3 分钟，屏幕可能会闪几下，属正常现象。", "\nWithout this driver there is no virtual screen. Click \"Install driver\" and the wizard will automatically:\n1) Import the driver's signing certificate (without it the system rejects the driver)\n2) Install the driver into the system and create the virtual screen device\nThe process takes about 1–3 minutes; the screen may flicker a few times, which is normal."),
             );
-            set_action("开始安装驱动", true);
+            set_action(tr("开始安装驱动", "Install driver"), true);
         }
     }
 }
@@ -501,8 +501,8 @@ fn on_action(hwnd: HWND) {
                     s.verify_for = VerifyFor::Create;
                 }
             });
-            append_line("\n正在创建手机屏并验证（最长等 20 秒）…");
-            set_action("正在验证…", false);
+            append_line(tr("\n正在创建手机屏并验证（最长等 20 秒）…", "\nCreating the phone screen and verifying (waiting up to 20 s)…"));
+            set_action(tr("正在验证…", "Verifying…"), false);
             crate::create_phone_screen();
             start_verify(hwnd.0 as usize);
         }
@@ -512,8 +512,8 @@ fn on_action(hwnd: HWND) {
                     s.busy = true;
                 }
             });
-            append_line("\n正在删除手机屏并验证（最长等 20 秒）…");
-            set_action("正在验证…", false);
+            append_line(tr("\n正在删除手机屏并验证（最长等 20 秒）…", "\nRemoving the phone screen and verifying (waiting up to 20 s)…"));
+            set_action(tr("正在验证…", "Verifying…"), false);
             crate::remove_phone_screen();
             start_remove_poll(hwnd.0 as usize);
         }
@@ -524,8 +524,8 @@ fn on_action(hwnd: HWND) {
                     s.verify_for = VerifyFor::Test;
                 }
             });
-            append_line("\n正在创建手机屏并打开测试画面（最长等 20 秒）…");
-            set_action("正在验证…", false);
+            append_line(tr("\n正在创建手机屏并打开测试画面（最长等 20 秒）…", "\nCreating the phone screen and opening the test pattern (waiting up to 20 s)…"));
+            set_action(tr("正在验证…", "Verifying…"), false);
             crate::create_phone_screen();
             start_verify(hwnd.0 as usize);
         }
@@ -540,9 +540,9 @@ fn on_action(hwnd: HWND) {
                     }
                 });
                 set_text(
-                    "第 2 步（共 5 步）：安装驱动\n\n正在安装，输出在下面实时滚动，不要关这个窗口…\n",
+                    tr("第 2 步（共 5 步）：安装驱动\n\n正在安装，输出在下面实时滚动，不要关这个窗口…\n", "Step 2 of 5: Install the driver\n\nInstalling; the output scrolls below in real time. Do not close this window…\n"),
                 );
-                set_action("正在安装…", false);
+                set_action(tr("正在安装…", "Installing…"), false);
                 start_install(hwnd.0 as usize);
             }
         }
@@ -569,7 +569,7 @@ unsafe extern "system" fn guide_wnd_proc(
             let title = crate::mk_control(
                 hwnd,
                 "Static",
-                "配置向导",
+                tr("配置向导", "Setup Wizard"),
                 base,
                 sc(20),
                 sc(14),
@@ -595,7 +595,7 @@ unsafe extern "system" fn guide_wnd_proc(
             let action = crate::mk_control(
                 hwnd,
                 "Button",
-                "正在检查…",
+                tr("正在检查…", "Checking…"),
                 base | WINDOW_STYLE(0x0000_000B), // BS_OWNERDRAW：与主窗口同款自绘
                 sc(20),
                 ch - sc(64),
@@ -607,7 +607,7 @@ unsafe extern "system" fn guide_wnd_proc(
             let _ = crate::mk_control(
                 hwnd,
                 "Button",
-                "关闭",
+                tr("关闭", "Close"),
                 base | WINDOW_STYLE(0x0000_000B), // BS_OWNERDRAW
                 cw - sc(170),
                 ch - sc(64),
@@ -633,9 +633,9 @@ unsafe extern "system" fn guide_wnd_proc(
                 });
             });
             set_text(
-                "第 1 步（共 5 步）：检查驱动\n\n\
+                tr("第 1 步（共 5 步）：检查驱动\n\n\
                  这个向导会一步步把虚拟屏搞通：检查驱动 → 缺了就装 → \
-                 创建、删除各验证一遍 → 最后打开测试画面看串流。\n\n正在检查…",
+                 创建、删除各验证一遍 → 最后打开测试画面看串流。\n\n正在检查…", "Step 1 of 5: Check the driver\n\nThis wizard gets the virtual screen working step by step: check the driver → install it if missing → verify creating and removing → finally open the test pattern to check streaming.\n\nChecking…"),
             );
             start_check(hwnd.0 as usize);
             LRESULT(0)
@@ -707,10 +707,8 @@ unsafe extern "system" fn guide_wnd_proc(
                     s.busy = true;
                 }
             });
-            append_line(&format!(
-                "\n安装脚本已结束（退出码 {exit}），重新检查驱动…"
-            ));
-            set_action("正在检查…", false);
+            append_line(&tr_fmt!("\n安装脚本已结束（退出码 {exit}），重新检查驱动…", "\nThe install script has finished (exit code {exit}); rechecking the driver…"));
+            set_action(tr("正在检查…", "Checking…"), false);
             start_check(hwnd.0 as usize);
             LRESULT(0)
         }
@@ -746,40 +744,36 @@ unsafe extern "system" fn guide_wnd_proc(
                                 d.width as i32,
                                 d.height as i32,
                             ) {
-                                Ok(()) => set_text(&format!(
-                                    "全部搞通 ✓\n\n\
+                                Ok(()) => set_text(&tr_fmt!("全部搞通 ✓\n\n\
                                      驱动安装、创建、删除都验证过了，测试画面已经铺在虚拟屏上（{}×{}）。\n\n\
                                      现在用手机打开向日葵连进这块屏，看动画顺不顺、帧号跳不跳。\
                                      测试画面按 Esc 或点它上面的「关闭」退出。\n\
-                                     向导可以关了，之后日常使用不需要再走一遍。",
-                                    d.width, d.height
-                                )),
-                                Err(e) => set_text(&format!(
-                                    "创建和删除都验证过了，但测试画面没打开：{e}\n\n\
-                                     可以回主窗口点「测试窗口」手动开。向导可以关了。"
-                                )),
+                                     向导可以关了，之后日常使用不需要再走一遍。", "All done ✓\n\nDriver installation, creation and removal are all verified, and the test pattern is now on the virtual screen ({}×{}).\n\nNow open Sunlogin on your phone, connect to this screen, and check whether the animation runs smoothly and the frame counter advances without jumps.\nThe test pattern exits with Esc or its \"Close\" button.\nYou can close the wizard now; daily use does not need it again.",
+                                    d.width, d.height)),
+                                Err(e) => set_text(&tr_fmt!("创建和删除都验证过了，但测试画面没打开：{e}\n\n\
+                                     可以回主窗口点「测试窗口」手动开。向导可以关了。", "Creation and removal are verified, but the test pattern did not open: {e}\n\nYou can open it manually from the main window via \"Test window\". You can close the wizard now.")),
                             }
                         }
                         None => set_text(
-                            "创建和删除都验证过了，但回头没找到手机屏。\
-                             回主窗口看一眼状态。向导可以关了。",
+                            tr("创建和删除都验证过了，但回头没找到手机屏。\
+                             回主窗口看一眼状态。向导可以关了。", "Creation and removal are verified, but the phone screen is nowhere to be found now.\nCheck the status in the main window. You can close the wizard now."),
                         ),
                     }
-                    set_action("完成", true);
+                    set_action(tr("完成", "Done"), true);
                 }
                 (1, _) => {
                     append_line(
-                        "\n虚拟屏出现了，但还不是手机尺寸。主窗口日志里有创建细节，\
-                         也可以点「重试」再来一次。",
+                        tr("\n虚拟屏出现了，但还不是手机尺寸。主窗口日志里有创建细节，\
+                         也可以点「重试」再来一次。", "\nThe virtual screen appeared, but it is not phone size yet. The main window's log has the creation details; you can also click \"Retry\" to try again."),
                     );
-                    set_action("重试", true);
+                    set_action(tr("重试", "Retry"), true);
                 }
                 _ => {
                     append_line(
-                        "\n等了 20 秒还没看到虚拟屏。主窗口的日志里有创建过程的细节，\
-                         把主窗口切出来看最后几行；也可以点「重试」。",
+                        tr("\n等了 20 秒还没看到虚拟屏。主窗口的日志里有创建过程的细节，\
+                         把主窗口切出来看最后几行；也可以点「重试」。", "\nWaited 20 s and still no virtual screen. The main window's log has the creation details; bring it up and read the last few lines, or click \"Retry\"."),
                     );
-                    set_action("重试", true);
+                    set_action(tr("重试", "Retry"), true);
                 }
             }
             LRESULT(0)
@@ -795,10 +789,10 @@ unsafe extern "system" fn guide_wnd_proc(
                 goto_test();
             } else {
                 append_line(
-                    "\n等了 20 秒虚拟屏还在桌面上，删除没验证过。主窗口日志里有删除过程的细节；\
-                     也可以点「重试」。",
+                    tr("\n等了 20 秒虚拟屏还在桌面上，删除没验证过。主窗口日志里有删除过程的细节；\
+                     也可以点「重试」。", "\nWaited 20 s and the virtual screen is still on the desktop; removal is not verified. The main window's log has the removal details; or click \"Retry\"."),
                 );
-                set_action("重试", true);
+                set_action(tr("重试", "Retry"), true);
             }
             LRESULT(0)
         }

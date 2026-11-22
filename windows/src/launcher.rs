@@ -7,6 +7,8 @@
 
 use crate::apps::{self, InstalledApp, RunningWindow};
 use crate::display::wide;
+use crate::lang::tr;
+use crate::tr_fmt;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -171,7 +173,7 @@ fn register_classes() -> Result<(), String> {
         };
         if unsafe { RegisterClassW(&wc) } == 0 {
             CLASSES_DONE.store(false, Ordering::SeqCst);
-            return Err(format!("RegisterClassW({name}) 失败"));
+            return Err(tr_fmt!("RegisterClassW({name}) 失败", "RegisterClassW({name}) failed"));
         }
     }
     Ok(())
@@ -246,7 +248,7 @@ pub fn toggle(rect: RECT) {
         return;
     }
     if let Err(e) = open(rect) {
-        crate::ui_log(&format!("打开资源库失败：{e}"));
+        crate::ui_log(&tr_fmt!("打开资源库失败：{e}", "Failed to open the app library: {e}"));
     }
 }
 
@@ -272,12 +274,10 @@ fn scan_apps_data() -> AppsData {
     let recent = apps::recent_apps(&installed);
     let usage = apps::usage_map();
     let eff = apps::effective_usage(&usage, &installed);
-    crate::log::write(&format!(
-        "资源库数据扫描完成：全部 {} 个 App，最近使用 {} 个，使用频率 {} 条键",
+    crate::log::write(&tr_fmt!("资源库数据扫描完成：全部 {} 个 App，最近使用 {} 个，使用频率 {} 条键", "App library scan complete: {} apps in All, {} recent, {} usage keys",
         installed.len(),
         recent.len(),
-        usage.len()
-    ));
+        usage.len()));
     // 频率排序的前几名打出来（用去重后的有效次数），真机上能直接核对排序对不对
     let mut ranked: Vec<&InstalledApp> = installed.iter().collect();
     ranked.sort_by(|a, b| {
@@ -287,12 +287,10 @@ fn scan_apps_data() -> AppsData {
     });
     for a in ranked.iter().take(8) {
         let u = eff.get(&a.key()).copied().unwrap_or_default();
-        crate::log::write(&format!(
-            "  频率：{} 启动 {} 次{}",
+        crate::log::write(&tr_fmt!("  频率：{} 启动 {} 次{}", "  Usage: {} launched {} time(s){}",
             a.name,
             u.count,
-            if apps::is_common_app(a) { "（常用）" } else { "" }
-        ));
+            if apps::is_common_app(a) { tr("（常用）", " (common)") } else { "" }));
     }
     AppsData {
         installed,
@@ -339,18 +337,14 @@ pub fn open(rect: RECT) -> Result<(), String> {
     let recent = data.recent;
     let usage = data.usage;
     let eff = data.eff;
-    crate::log::write(&format!(
-        "资源库：运行中 {} 个窗口，全部 {} 个 App（数据{}，备数据 {} ms）",
+    crate::log::write(&tr_fmt!("资源库：运行中 {} 个窗口，全部 {} 个 App（数据{}，备数据 {} ms）", "App library: {} running window(s), {} apps in All (data {}, prepared in {} ms)",
         running.len(),
         installed.len(),
-        if from_cache { "来自缓存" } else { "全量扫描" },
-        t0.elapsed().as_millis()
-    ));
+        if from_cache { tr("来自缓存", "from cache") } else { tr("全量扫描", "full scan") },
+        t0.elapsed().as_millis()));
     for w in &running {
-        crate::log::write(&format!(
-            "  运行中：{}（pid {}）— {}",
-            w.app_name, w.pid, w.title
-        ));
+        crate::log::write(&tr_fmt!("  运行中：{}（pid {}）— {}", "  Running: {} (pid {}) — {}",
+            w.app_name, w.pid, w.title));
     }
     LAUNCHER.with(|c| {
         *c.borrow_mut() = Some(LauncherState {
@@ -374,7 +368,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
         });
     });
     let class_w = wide(LAUNCHER_CLASS);
-    let title_w = wide("App 资源库");
+    let title_w = wide(tr("App 资源库", "App Library"));
     let created = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -431,7 +425,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
                     }
                 }
             });
-            Err(format!("CreateWindowExW 失败：{e}"))
+            Err(tr_fmt!("CreateWindowExW 失败：{e}", "CreateWindowExW failed: {e}"))
         }
     }
 }
@@ -714,7 +708,7 @@ unsafe extern "system" fn home_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                     let rect = HOME.with(|c| c.borrow().as_ref().map(|s| s.rect));
                     if let Some(rect) = rect {
                         if let Err(e) = open(rect) {
-                            crate::log::write(&format!("打开资源库失败：{e}"));
+                            crate::log::write(&tr_fmt!("打开资源库失败：{e}", "Failed to open the app library: {e}"));
                         }
                     }
                 }
@@ -796,7 +790,7 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                 out.push(Item {
                     name: name.clone(),
                     sub: if wins.len() > 1 {
-                        format!("{} 个窗口", wins.len())
+                        tr_fmt!("{} 个窗口", "{} windows", wins.len())
                     } else {
                         first.title.clone()
                     },
@@ -848,7 +842,7 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                 commons.truncate(18);
                 if !commons.is_empty() {
                     out.push(Item {
-                        name: "常用 · 未打开".to_string(),
+                        name: tr("常用 · 未打开", "Common · Not open").to_string(),
                         sub: String::new(),
                         icon_path: String::new(),
                         running: false,
@@ -885,9 +879,9 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                 Item {
                     name: a.name.clone(),
                     sub: if running {
-                        "运行中".to_string()
+                        tr("运行中", "Running").to_string()
                     } else if recent {
-                        "最近使用".to_string()
+                        tr("最近使用", "Recent").to_string()
                     } else {
                         String::new()
                     },
@@ -1081,7 +1075,7 @@ fn close_window(hwnd: HWND, target: isize, title: &str) {
             LPARAM(0),
         );
     }
-    crate::ui_log(&format!("资源库：已请求关闭窗口「{title}」"));
+    crate::ui_log(&tr_fmt!("资源库：已请求关闭窗口「{title}」", "App library: close requested for window \"{title}\""));
     pump(350);
     refresh_running(hwnd);
 }
@@ -1115,11 +1109,9 @@ fn run_action(action: Action, name: &str) {
     match action {
         Action::Focus(hwnd) => {
             if apps::fullscreen_on(hwnd, rect) {
-                crate::ui_log(&format!("资源库：{name} 已全屏到虚拟屏"));
+                crate::ui_log(&tr_fmt!("资源库：{name} 已全屏到虚拟屏", "App library: {name} is now fullscreen on the virtual screen"));
             } else {
-                crate::ui_log(&format!(
-                    "资源库：{name} 的窗口移动没到位（可能不听 SetWindowPos），把它现在的屏幕位置看一眼，日志发回主会话"
-                ));
+                crate::ui_log(&tr_fmt!("资源库：{name} 的窗口移动没到位（可能不听 SetWindowPos），把它现在的屏幕位置看一眼，日志发回主会话", "App library: {name}'s window did not move into place (it may ignore SetWindowPos); check where it sits on screen and share this log for diagnosis"));
             }
             close();
         }
@@ -1146,21 +1138,19 @@ fn run_action(action: Action, name: &str) {
             });
             if let Some(w) = existing {
                 if apps::fullscreen_on(w.hwnd, rect) {
-                    crate::ui_log(&format!("资源库：{name} 已在运行，窗口已全屏到虚拟屏"));
+                    crate::ui_log(&tr_fmt!("资源库：{name} 已在运行，窗口已全屏到虚拟屏", "App library: {name} is already running; its window is now fullscreen on the virtual screen"));
                 } else {
-                    crate::ui_log(&format!(
-                        "资源库：{name} 已在运行，但窗口移动没到位，日志发回主会话"
-                    ));
+                    crate::ui_log(&tr_fmt!("资源库：{name} 已在运行，但窗口移动没到位，日志发回主会话", "App library: {name} is already running, but its window did not move into place; share this log for diagnosis"));
                 }
                 close();
                 return;
             }
             let before: HashSet<isize> = apps::running_windows().iter().map(|w| w.hwnd).collect();
             if !apps::launch_app(&spec) {
-                crate::ui_log(&format!("资源库：打开 {name} 失败（系统拒绝启动）"));
+                crate::ui_log(&tr_fmt!("资源库：打开 {name} 失败（系统拒绝启动）", "App library: failed to open {name} (the system refused to launch it)"));
                 return;
             }
-            crate::ui_log(&format!("资源库：正在打开 {name}，等它的窗口出现…"));
+            crate::ui_log(&tr_fmt!("资源库：正在打开 {name}，等它的窗口出现…", "App library: opening {name}, waiting for its window…"));
             close();
             // 等新窗口出现（最多 12 秒）：标题/App 名对得上的立即认；
             // 对不上的先攒着——第一个新窗口常是闪屏或加载窗，认最大的那个，
@@ -1209,17 +1199,13 @@ fn run_action(action: Action, name: &str) {
             match found {
                 Some(hwnd) => {
                     if apps::fullscreen_on(hwnd, rect) {
-                        crate::ui_log(&format!("资源库：{name} 的窗口已全屏到虚拟屏"));
+                        crate::ui_log(&tr_fmt!("资源库：{name} 的窗口已全屏到虚拟屏", "App library: {name}'s window is now fullscreen on the virtual screen"));
                     } else {
-                        crate::ui_log(&format!(
-                            "资源库：{name} 的窗口出现了但移动没到位，日志发回主会话"
-                        ));
+                        crate::ui_log(&tr_fmt!("资源库：{name} 的窗口出现了但移动没到位，日志发回主会话", "App library: {name}'s window appeared but did not move into place; share this log for diagnosis"));
                     }
                 }
                 None => {
-                    crate::ui_log(&format!(
-                        "资源库：等了 12 秒没等到 {name} 的新窗口（可能开在了已有窗口里，或启动较慢）"
-                    ));
+                    crate::ui_log(&tr_fmt!("资源库：等了 12 秒没等到 {name} 的新窗口（可能开在了已有窗口里，或启动较慢）", "App library: waited 12 s but no new window for {name} appeared (it may have opened inside an existing window, or it starts slowly)"));
                 }
             }
         }
@@ -1347,8 +1333,8 @@ fn paint(hwnd: HWND) {
             };
             fill_rounded(mem, track, rgb(231, 231, 235), 0);
             for (rcx, label, active) in [
-                (run_rc, "运行中", tab == Tab::Running),
-                (all_rc, "全部", tab == Tab::All),
+                (run_rc, tr("运行中", "Running"), tab == Tab::Running),
+                (all_rc, tr("全部", "All"), tab == Tab::All),
             ] {
                 if active {
                     fill_rounded(mem, rcx, rgb(255, 172, 42), 3);
@@ -1394,8 +1380,8 @@ fn paint(hwnd: HWND) {
                     bottom: CONTENT_TOP + 110,
                 };
                 let msg = match tab {
-                    Tab::Running => "没有正在运行的 App",
-                    Tab::All => "没有找到 App",
+                    Tab::Running => tr("没有正在运行的 App", "No running apps"),
+                    Tab::All => tr("没有找到 App", "No apps found"),
                 };
                 draw_text(mem, msg, &mut tr, DT_CENTER | DT_SINGLELINE);
             }
@@ -1480,9 +1466,9 @@ fn paint(hwnd: HWND) {
                             (
                                 expand_chip_rect(item, r, w),
                                 if item.expanded {
-                                    "收起 ▴".to_string()
+                                    tr("收起 ▴", "Collapse ▴").to_string()
                                 } else {
-                                    format!("{} 窗 ▾", item.win_count)
+                                    tr_fmt!("{} 窗 ▾", "{} win ▾", item.win_count)
                                 },
                             ),
                             (close_btn_rect(item, r, w), "✕".to_string()),
@@ -1607,7 +1593,7 @@ unsafe extern "system" fn launcher_proc(
                         );
                     }
                     // EM_SETCUEBANNER = 0x1501：空框时显示灰色提示词
-                    let cue = wide("搜索 App");
+                    let cue = wide(tr("搜索 App", "Search apps"));
                     let _ = SendMessageW(
                         search,
                         0x1501,
