@@ -32,11 +32,12 @@ use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
-    FillRect, GetDC, GetDeviceCaps, InvalidateRect, ReleaseDC, RoundRect, SelectObject,
-    SetBkMode, SetTextColor,
+    FillRect, GetDC, GetDeviceCaps, InvalidateRect, RedrawWindow, ReleaseDC, RoundRect,
+    SelectObject, SetBkMode, SetTextColor,
     CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER,
     DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HBRUSH, HDC, HFONT, HGDIOBJ, LOGPIXELSX,
-    OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, SetBkColor, TRANSPARENT,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE,
+    SetBkColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
@@ -1868,6 +1869,14 @@ unsafe extern "system" fn main_wnd_proc(
                 "自动建屏：关"
             });
             install_advanced_menu(hwnd);
+            // 单选钮在创建时就擦过一次背景，那时卡片位置还没定，主题控件代画父背景
+            // 擦到的是页底灰（灰带）；布局落定后强制全体子控件重擦重画一次才消失
+            let _ = RedrawWindow(
+                Some(hwnd),
+                None,
+                None,
+                RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN,
+            );
             ui_log(if saved.only_virtual {
                 "高级模式：连入时仅输出虚拟屏（在左上角图标菜单的「高级模式」里可关）"
             } else {
