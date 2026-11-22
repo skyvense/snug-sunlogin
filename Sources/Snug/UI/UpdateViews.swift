@@ -8,16 +8,16 @@ extension UpdateState {
     /// 一句话的状态：「关于 Snug」里软件更新那一行的说明
     var summary: String {
         switch phase {
-        case .checking: return "检查中"
-        case .downloading(let fraction): return "下载中 \(Int(fraction * 100))%"
-        case .installing: return "安装中"
+        case .checking: return Lang.tr("检查中", "Checking…")
+        case .downloading(let fraction): return Lang.tr("下载中", "Downloading") + " \(Int(fraction * 100))%"
+        case .installing: return Lang.tr("安装中", "Installing…")
         case .idle: break
         }
         if let problem { return problem.text }
         return switch check {
-        case .unknown: Updater.current == nil ? "开发版不检查更新" : "尚未检查"
-        case .upToDate: "已是最新"
-        case .available(let feed): "新版本 \(feed.version)"
+        case .unknown: Updater.current == nil ? Lang.tr("开发版不检查更新", "Development builds don't check for updates") : Lang.tr("尚未检查", "Not checked yet")
+        case .upToDate: Lang.tr("已是最新", "Up to date")
+        case .available(let feed): Lang.tr("新版本", "New version") + " \(feed.version)"
         }
     }
 }
@@ -33,11 +33,11 @@ struct UpdateSection: View {
             LabeledContent {
                 action
             } label: {
-                SettingLabel("软件更新", detail: state.update.summary, warning: state.update.problem != nil,
+                SettingLabel(state.tr("软件更新", "Software Update"), detail: state.update.summary, warning: state.update.problem != nil,
                              symbol: "arrow.down", tint: .blue)
             }
             LabeledContent {
-                Picker("更新源", selection: Binding(get: { state.config.updateSource }, set: { intents.setUpdateSource($0) })) {
+                Picker(state.tr("更新源", "Update Source"), selection: Binding(get: { state.config.updateSource }, set: { intents.setUpdateSource($0) })) {
                     ForEach(UpdateSource.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.menu)
@@ -45,7 +45,7 @@ struct UpdateSection: View {
                 .fixedSize()
                 .disabled(state.update.phase != .idle)
             } label: {
-                SettingLabel("更新源", symbol: "server.rack", tint: .gray)
+                SettingLabel(state.tr("更新源", "Update Source"), symbol: "server.rack", tint: .gray)
             }
         }
     }
@@ -61,15 +61,15 @@ struct UpdateSection: View {
         case .idle:
             HStack(spacing: 12) {
                 if update.available != nil {
-                    Button("更新内容") { navigation.openUpdate() }.buttonStyle(.link)
+                    Button(state.tr("更新内容", "What's New")) { navigation.openUpdate() }.buttonStyle(.link)
                 }
                 if update.problem?.needsDownload == true {
-                    Button("前往下载") { intents.openDownloadPage() }
+                    Button(state.tr("前往下载", "Go to Download")) { intents.openDownloadPage() }
                 } else if update.available != nil {
-                    Button(update.problem == nil ? "立即更新" : "重试") { intents.installUpdate() }
+                    Button(update.problem == nil ? state.tr("立即更新", "Update Now") : state.tr("重试", "Retry")) { intents.installUpdate() }
                         .buttonStyle(.borderedProminent)
                 } else {
-                    Button("检查更新") { intents.checkForUpdates() }.disabled(Updater.current == nil)
+                    Button(state.tr("检查更新", "Check for Updates")) { intents.checkForUpdates() }.disabled(Updater.current == nil)
                 }
             }
         }
@@ -92,8 +92,8 @@ struct UpdateView: View {
                         .resizable()
                         .frame(width: 48, height: 48)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("新版本 \(feed.version.description)").font(.title3.bold())
-                        Text(notes.count > 1 ? "当前 \(current.description) · 共 \(notes.count) 个新版本" : "当前 \(current.description)")
+                        Text(state.tr("新版本", "New version") + " \(feed.version.description)").font(.title3.bold())
+                        Text(notes.count > 1 ? state.tr("当前", "Current") + " \(current.description) · " + state.tr("共 \(notes.count) 个新版本", "\(notes.count) new versions") : state.tr("当前", "Current") + " \(current.description)")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -128,23 +128,23 @@ struct UpdateView: View {
         return HStack(spacing: 12) {
             switch update.phase {
             case .downloading(let fraction):
-                Text("下载中")
+                Text(state.tr("下载中", "Downloading"))
                 ProgressView(value: fraction)
                 Text("\(Int(fraction * 100))%").monospacedDigit().foregroundStyle(.secondary)
             case .installing:
                 ProgressView().controlSize(.small)
-                Text("安装中，完成后自动重新打开").foregroundStyle(.secondary)
+                Text(state.tr("安装中，完成后自动重新打开", "Installing — Snug will reopen when done")).foregroundStyle(.secondary)
                 Spacer()
             case .idle, .checking:
                 if let problem = update.problem {
                     Label(problem.text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 }
                 Spacer()
-                Button("稍后", action: close).keyboardShortcut(.cancelAction)
+                Button(state.tr("稍后", "Later"), action: close).keyboardShortcut(.cancelAction)
                 if update.problem?.needsDownload == true {
-                    Button("前往下载") { intents.openDownloadPage() }.keyboardShortcut(.defaultAction)
+                    Button(state.tr("前往下载", "Go to Download")) { intents.openDownloadPage() }.keyboardShortcut(.defaultAction)
                 } else {
-                    Button(update.problem == nil ? "立即更新" : "重试") { intents.installUpdate() }
+                    Button(update.problem == nil ? state.tr("立即更新", "Update Now") : state.tr("重试", "Retry")) { intents.installUpdate() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(update.phase == .checking)
                 }
@@ -207,7 +207,7 @@ final class UpdateWindowController {
         guard let current = Updater.current else { return }
         if window == nil {
             let view = UpdateView(state: state, current: current, intents: intents) { [weak self] in self?.window?.close() }
-            window = NSWindow(hosting: view, title: "软件更新")
+            window = NSWindow(hosting: view, title: Lang.tr("软件更新", "Software Update"))
         }
         window?.present(activating: activating)
     }

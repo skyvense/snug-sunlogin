@@ -16,13 +16,13 @@ struct WelcomeView: View {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .frame(width: 80, height: 80)
-                Text("欢迎使用 Snug").font(.largeTitle.bold())
-                Text("手机远程 Mac 的显示与触控增强").foregroundStyle(.secondary)
+                Text(state.tr("欢迎使用 Snug", "Welcome to Snug")).font(.largeTitle.bold())
+                Text(state.tr("手机远程 Mac 的显示与触控增强", "Display & touch enhancements for phone-to-Mac remote control")).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 20) {
-                Feature(symbol: "iphone.gen3", title: "选择「\(PhoneScreenSpec.name)」", detail: "向日葵 屏幕列表中切换；不切换则一切如常")
-                Feature(symbol: "hand.point.up.left.fill", title: "点选 App 或窗口", detail: "铺满手机屏，字号自动放大")
-                Feature(symbol: "hand.draw.fill", title: "触控手势", detail: "单指滚动 · 长按选择 · 长按松开右键")
+                Feature(symbol: "iphone.gen3", title: state.tr("选择「\(PhoneScreenSpec.name)」", "Pick \"\(PhoneScreenSpec.name)\""), detail: state.tr("向日葵 屏幕列表中切换；不切换则一切如常", "Switch to it in Sunlogin's screen list; if you don't, everything works as usual"))
+                Feature(symbol: "hand.point.up.left.fill", title: state.tr("点选 App 或窗口", "Tap an app or window"), detail: state.tr("铺满手机屏，字号自动放大", "Fills the phone screen, text scales up automatically"))
+                Feature(symbol: "hand.draw.fill", title: state.tr("触控手势", "Touch gestures"), detail: state.tr("单指滚动 · 长按选择 · 长按松开右键", "One-finger scroll · Long-press to select · Long-press release for right-click"))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack {
@@ -35,9 +35,9 @@ struct WelcomeView: View {
             HStack(spacing: 12) {
                 Spacer()
                 if granted {
-                    Button("完成", action: onDone).keyboardShortcut(.defaultAction)
+                    Button(state.tr("完成", "Done"), action: onDone).keyboardShortcut(.defaultAction)
                 } else {
-                    Button("稍后", action: onDone)
+                    Button(state.tr("稍后", "Later"), action: onDone)
                     AuthorizeButton(pane: .accessibility)
                         .keyboardShortcut(.defaultAction)
                 }

@@ -12,17 +12,17 @@ struct LegacyNoticeView: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill").font(.title).foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("旧版「UU远程伴侣」运行中").font(.title3.bold())
-                    Text("与 Snug 同时运行将相互干扰")
+                    Text(Lang.tr("旧版「UU远程伴侣」运行中", "The legacy UU Remote Companion is running")).font(.title3.bold())
+                    Text(Lang.tr("与 Snug 同时运行将相互干扰", "Running both at once will interfere with each other"))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("退出后自动还原 · 可从「应用程序」移除")
+                    Text(Lang.tr("退出后自动还原 · 可从「应用程序」移除", "Quitting restores everything · You can remove it from Applications"))
                         .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
             HStack {
                 Spacer()
-                Button("保留两者", action: keepBoth)
-                Button("退出旧版", action: quitLegacy).keyboardShortcut(.defaultAction)
+                Button(Lang.tr("保留两者", "Keep Both"), action: keepBoth)
+                Button(Lang.tr("退出旧版", "Quit Legacy App"), action: quitLegacy).keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
