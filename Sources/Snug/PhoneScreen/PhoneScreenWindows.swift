@@ -15,6 +15,8 @@ final class PhoneScreenWindows {
     private let pages = PhonePages()
     private let intents: any PhoneIntents
     private var display: DisplayID?
+    /// 面板建出来时的界面语言（改语言要重建，见 update）
+    private var builtEnglish = false
     private var list: PhonePanel?
     private var homeBar: PhonePanel?
     private var homeBarView: HomeBarView?
@@ -38,6 +40,7 @@ final class PhoneScreenWindows {
     private func follow() {
         withObservationTracking {
             _ = state.phone
+            _ = state.english
             _ = state.streamedDisplay
             _ = state.screenshotOverlay
             _ = state.config.screenshot
@@ -56,6 +59,10 @@ final class PhoneScreenWindows {
         let phone = state.phone
         guard let id = phone.display, let screen = Screens.screen(for: id) else { return tearDown() }
         if id != display {
+            tearDown()
+            build(on: id)
+        } else if builtEnglish != state.english {
+            // 语言变了：面板里的文案是建时定的，拆掉重建才换得过来（和换屏同一条路）
             tearDown()
             build(on: id)
         }
@@ -138,6 +145,7 @@ final class PhoneScreenWindows {
 
     private func build(on id: DisplayID) {
         display = id
+        builtEnglish = state.english
         list = PhonePanel(content: FirstMouseHostingView(rootView: PhoneHomeView(state: state, catalog: catalog, pages: pages, intents: intents)))
         let bar = HomeBarView()
         bar.onActivate = { [weak self] in self?.intents.showList() }
@@ -251,9 +259,9 @@ final class HomeBarView: NSView {
     required init?(coder: NSCoder) { fatalError("不从 nib 加载") }
 
     private func updateIcons() {
-        grabber.image = NSImage(systemSymbolName: "chevron.compact.up", accessibilityDescription: "App 资源库")?
+        grabber.image = NSImage(systemSymbolName: "chevron.compact.up", accessibilityDescription: Lang.tr("App 资源库", "App Library"))?
             .withSymbolConfiguration(.init(pointSize: 22 * scale, weight: .semibold))
-        camera.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "截图")?
+        camera.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: Lang.tr("截图", "Screenshot"))?
             .withSymbolConfiguration(.init(pointSize: 20 * scale, weight: .semibold))
         needsLayout = true
     }

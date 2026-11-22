@@ -61,7 +61,7 @@ struct PhoneHomeView: View {
     enum Tab: CaseIterable, Identifiable {
         case running, all
         var id: Self { self }
-        var title: String { self == .running ? "运行中" : "全部" }
+        var title: String { self == .running ? Lang.tr("运行中", "Running") : Lang.tr("全部", "All") }
     }
 
     /// 在等再点一下确认的：退出哪个 App、关哪个窗口、退出手机屏。同一时刻只有一个；
@@ -137,11 +137,11 @@ struct PhoneHomeView: View {
             Spacer(minLength: 12)
             HStack(spacing: 0) {
                 // 确认卡在页眉里：每次点都滚回去，翻到下面时再点也看得见
-                navButton(Self.dismissSymbol, label: "退出手机屏") {
+                navButton(Self.dismissSymbol, label: state.tr("退出手机屏", "Exit Phone Screen")) {
                     confirming = .dismissScreen
                     withAnimation { proxy.scrollTo(Self.top, anchor: .top) }
                 }
-                navButton("iphone.gen3", label: "手机型号", atEdge: true) { pages.open(.phoneModel) }
+                navButton("iphone.gen3", label: state.tr("手机型号", "Phone Model"), atEdge: true) { pages.open(.phoneModel) }
             }
         }
         .frame(height: PhoneStyle.touchTarget)
@@ -169,13 +169,13 @@ struct PhoneHomeView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("App").font(PhoneStyle.largeTitle)
             Button { pages.open(.search) } label: {
-                SearchBar { Text("搜索 App").foregroundStyle(.secondary) }
+                SearchBar { Text(state.tr("搜索 App", "Search apps")).foregroundStyle(.secondary) }
             }
             .buttonStyle(PressableStyle())
             if confirming == .dismissScreen {
-                Banner(symbol: Self.dismissSymbol, tint: .red, headline: "退出手机屏？", detail: "窗口还原，下次远程时恢复") {
+                Banner(symbol: Self.dismissSymbol, tint: .red, headline: state.tr("退出手机屏？", "Exit the phone screen?"), detail: state.tr("窗口还原，下次远程时恢复", "Windows will be restored; it comes back next session")) {
                     // 间距和提示卡里的「稍后 / 强制退出」一样
-                    ConfirmButtons(title: "退出", confirming: $confirming, spacing: 12) { intents.dismissScreen() }
+                    ConfirmButtons(title: state.tr("退出", "Exit"), confirming: $confirming, spacing: 12) { intents.dismissScreen() }
                 }
             } else if let notice = phone.notice {
                 NoticeBanner(notice: notice, intents: intents)
@@ -195,15 +195,15 @@ struct PhoneHomeView: View {
     private var runningPage: some View {
         VStack(alignment: .leading, spacing: 24) {
             if let placed = phone.placed {
-                TitledSection("当前 App") { appCard(catalog.app(of: placed.window)) }
+                TitledSection(state.tr("当前 App", "Current App")) { appCard(catalog.app(of: placed.window)) }
             }
             let others = catalog.running.filter { $0.pid != phone.placed?.window.key.pid }
             if !catalog.loaded {
-                EmptyState(symbol: nil, text: "正在读取")
+                EmptyState(symbol: nil, text: state.tr("正在读取", "Loading…"))
             } else if others.isEmpty {
-                if phone.placed == nil { EmptyState(symbol: "square.grid.2x2", text: "没有正在运行的 App") }
+                if phone.placed == nil { EmptyState(symbol: "square.grid.2x2", text: state.tr("没有正在运行的 App", "No apps running")) }
             } else if phone.placed != nil {
-                TitledSection("其他 App") { appCards(others) }
+                TitledSection(state.tr("其他 App", "Other Apps")) { appCards(others) }
             } else {
                 appCards(others)
             }
@@ -271,7 +271,7 @@ private struct BackButton: View {
             .background(PhoneStyle.tint.opacity(0.12), in: Capsule())
         }
         .buttonStyle(PressableStyle())
-        .accessibilityLabel("返回 \(app)")
+        .accessibilityLabel(Lang.tr("返回 \(app)", "Back to \(app)"))
     }
 }
 
@@ -285,8 +285,8 @@ private struct NoticeBanner: View {
         Banner(symbol: "exclamationmark.circle.fill", tint: .orange, headline: text.headline, detail: text.detail) {
             if case .quitStalled(let app, let pid) = notice {
                 HStack(spacing: 12) {
-                    PillButton(title: "稍后") { intents.dismissNotice() }
-                    PillButton(title: "强制退出", destructive: true) { intents.forceQuit(pid: pid, app: app) }
+                    PillButton(title: Lang.tr("稍后", "Later")) { intents.dismissNotice() }
+                    PillButton(title: Lang.tr("强制退出", "Force Quit"), destructive: true) { intents.forceQuit(pid: pid, app: app) }
                 }
             }
         }
@@ -331,7 +331,7 @@ private struct AllApps: View {
 
     var body: some View {
         if catalog.installed.isEmpty {
-            EmptyState(symbol: nil, text: "正在读取")
+            EmptyState(symbol: nil, text: Lang.tr("正在读取", "Loading…"))
         } else {
             let running = Dictionary(catalog.running.map { ($0.app.bundleID, $0.pid) }, uniquingKeysWith: { first, _ in first })
             LazyVGrid(columns: Self.columns, spacing: 20) {
@@ -376,14 +376,14 @@ private struct BusyView: View {
         init?(_ work: PhoneDesk.Work?, catalog: AppCatalog, phone: PhoneChoice) {
             switch work {
             case .opening(let app):
-                (art, title, subtitle, status) = (.icon(catalog.icon(for: app)), app.name, nil, "正在打开")
+                (art, title, subtitle, status) = (.icon(catalog.icon(for: app)), app.name, nil, Lang.tr("正在打开", "Opening…"))
             case .placing(let window):
                 (art, title, subtitle, status) = (.icon(catalog.icon(for: window)), window.app,
-                                                  window.title.isEmpty ? nil : window.title, "正在打开")
+                                                  window.title.isEmpty ? nil : window.title, Lang.tr("正在打开", "Opening…"))
             case .reshaping:
-                (art, title, subtitle, status) = (.symbol("iphone.gen3"), phone.title, phone.screen.sizeText, "正在调整屏幕比例")
+                (art, title, subtitle, status) = (.symbol("iphone.gen3"), phone.title, phone.screen.sizeText, Lang.tr("正在调整屏幕比例", "Adjusting the screen ratio"))
             case .dismissing:
-                (art, title, subtitle, status) = (.symbol(PhoneHomeView.dismissSymbol), PhoneScreenSpec.name, nil, "正在退出")
+                (art, title, subtitle, status) = (.symbol(PhoneHomeView.dismissSymbol), PhoneScreenSpec.name, nil, Lang.tr("正在退出", "Exiting…"))
             default:
                 return nil
             }

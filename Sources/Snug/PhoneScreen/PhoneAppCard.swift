@@ -50,8 +50,8 @@ struct AppCard: View {
     }
 
     private var subtitle: String {
-        if askingQuit { return "退出 \(app.app.name)？" }
-        if quitting { return "正在退出" }
+        if askingQuit { return Lang.tr("退出 \(app.app.name)？", "Quit \(app.app.name)?") }
+        if quitting { return Lang.tr("正在退出", "Quitting…") }
         return app.windowSummary
     }
 
@@ -59,12 +59,12 @@ struct AppCard: View {
         if quitting {
             ProgressView().controlSize(.small).frame(width: PhoneStyle.touchTarget)
         } else if askingQuit {
-            ConfirmButtons(title: "退出", confirming: $confirming) { intents.quit(app) }
+            ConfirmButtons(title: Lang.tr("退出", "Quit"), confirming: $confirming) { intents.quit(app) }
         } else {
             HStack(spacing: 8) {
-                RoundButton(symbol: "macwindow.badge.plus", label: "新建窗口") { intents.newWindow(app) }
+                RoundButton(symbol: "macwindow.badge.plus", label: Lang.tr("新建窗口", "New Window")) { intents.newWindow(app) }
                 if AppList.canQuit(app.app) {
-                    RoundButton(symbol: "xmark.app", label: "退出") { confirming = .quit(app.pid) }
+                    RoundButton(symbol: "xmark.app", label: Lang.tr("退出", "Quit")) { confirming = .quit(app.pid) }
                 }
             }
         }
@@ -89,14 +89,14 @@ private struct WindowRow: View {
                         .font(PhoneStyle.headline.weight(.regular))
                         .foregroundStyle(onPhone ? PhoneStyle.tint : .secondary)
                         .frame(width: PhoneStyle.iconSize)
-                    Text(askingClose ? "关闭此窗口？" : window.displayTitle)
+                    Text(askingClose ? Lang.tr("关闭此窗口？", "Close this window?") : window.displayTitle)
                         .font(PhoneStyle.body)
                         .foregroundStyle(askingClose ? Color.red : .primary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if !askingClose {
-                        if onPhone { Tag(text: "在手机屏上", color: PhoneStyle.tint) }
-                        if window.minimized { Tag(text: "已最小化", color: .secondary) }
+                        if onPhone { Tag(text: Lang.tr("在手机屏上", "On Phone Screen"), color: PhoneStyle.tint) }
+                        if window.minimized { Tag(text: Lang.tr("已最小化", "Minimized"), color: .secondary) }
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -115,10 +115,10 @@ private struct WindowRow: View {
         if closing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("正在关闭").font(PhoneStyle.label).foregroundStyle(.secondary)
+                Text(Lang.tr("正在关闭", "Closing…")).font(PhoneStyle.label).foregroundStyle(.secondary)
             }
         } else if askingClose {
-            ConfirmButtons(title: "关闭", confirming: $confirming) { intents.close(window) }
+            ConfirmButtons(title: Lang.tr("关闭", "Close"), confirming: $confirming) { intents.close(window) }
         } else {
             Button { confirming = .close(window.key) } label: {
                 Image(systemName: "xmark.circle.fill")
@@ -127,7 +127,7 @@ private struct WindowRow: View {
                     .frame(width: PhoneStyle.touchTarget, height: PhoneStyle.touchTarget)
             }
             .buttonStyle(PressableStyle())
-            .accessibilityLabel("关闭窗口")
+            .accessibilityLabel(Lang.tr("关闭窗口", "Close Window"))
         }
     }
 }
@@ -156,14 +156,14 @@ private struct PlacedControls: View {
     var body: some View {
         HStack(spacing: 12) {
             if placed.zoomable {
-                RoundButton(symbol: "textformat.size.smaller", label: "缩小字号") { intents.zoom(by: -1) }
+                RoundButton(symbol: "textformat.size.smaller", label: Lang.tr("缩小字号", "Zoom Out Text")) { intents.zoom(by: -1) }
                     .disabled(placed.zoom <= ZoomBook.range.lowerBound)
                 Text(zoomText)
                     .font(PhoneStyle.body.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 72)
                     .contentTransition(.numericText())
-                RoundButton(symbol: "textformat.size.larger", label: "放大字号") { intents.zoom(by: 1) }
+                RoundButton(symbol: "textformat.size.larger", label: Lang.tr("放大字号", "Zoom In Text")) { intents.zoom(by: 1) }
                     .disabled(placed.zoom >= ZoomBook.range.upperBound)
             }
             Spacer(minLength: 8)
@@ -174,7 +174,7 @@ private struct PlacedControls: View {
                     } else {
                         Image(systemName: "arrow.uturn.backward")
                     }
-                    Text("还原")
+                    Text(Lang.tr("还原", "Restore"))
                 }
                 .font(PhoneStyle.body.weight(.medium))
                 .padding(.horizontal, 20)
@@ -189,6 +189,6 @@ private struct PlacedControls: View {
     }
 
     private var zoomText: String {
-        placed.zoom == 0 ? "默认字号" : "字号 \(placed.zoom > 0 ? "+" : "")\(placed.zoom)"
+        placed.zoom == 0 ? Lang.tr("默认字号", "Default size") : Lang.tr("字号", "Text") + " \(placed.zoom > 0 ? "+" : "")\(placed.zoom)"
     }
 }

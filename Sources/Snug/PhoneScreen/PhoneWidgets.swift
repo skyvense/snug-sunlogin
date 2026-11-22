@@ -83,7 +83,7 @@ struct ConfirmButtons<Value>: View {
 
     var body: some View {
         HStack(spacing: spacing) {
-            PillButton(title: "取消") { confirming = nil }
+            PillButton(title: Lang.tr("取消", "Cancel")) { confirming = nil }
             PillButton(title: title, destructive: true) {
                 confirming = nil
                 action()
@@ -183,7 +183,7 @@ struct ClearButton: View {
                 Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("清除")
+            .accessibilityLabel(Lang.tr("清除", "Clear"))
         }
     }
 }

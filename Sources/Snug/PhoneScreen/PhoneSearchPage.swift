@@ -17,12 +17,12 @@ struct SearchPage: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 SearchBar {
-                    TextField("搜索 App", text: $search.query)
+                    TextField(Lang.tr("搜索 App", "Search apps"), text: $search.query)
                         .textFieldStyle(.plain)
                         .focused($focused)
                     ClearButton(text: $search.query)
                 }
-                BarButton(title: "取消") { search.close() }
+                BarButton(title: Lang.tr("取消", "Cancel")) { search.close() }
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
@@ -54,14 +54,14 @@ struct SearchPage: View {
         } else {
             let result = AppList.search(query, installed: catalog.installed, running: catalog.running)
             if result.isEmpty {
-                EmptyState(symbol: "magnifyingglass", title: "无结果", text: "没有与「\(query)」相符的 App 或窗口")
+                EmptyState(symbol: "magnifyingglass", title: Lang.tr("无结果", "No results"), text: Lang.tr("没有与「\(query)」相符的 App 或窗口", "No apps or windows match “\(query)”"))
             } else {
                 VStack(alignment: .leading, spacing: 24) {
                     if !result.apps.isEmpty {
                         TitledSection("App") { ListCard(result.apps) { appRow($0) } }
                     }
                     if !result.windows.isEmpty {
-                        TitledSection("窗口") { ListCard(result.windows) { windowRow($0) } }
+                        TitledSection(Lang.tr("窗口", "Windows")) { ListCard(result.windows) { windowRow($0) } }
                     }
                 }
             }
@@ -71,7 +71,7 @@ struct SearchPage: View {
     private func appRow(_ app: AppInfo) -> some View {
         let running = catalog.running(app)
         let quitting = running.map { phone.quitting.contains($0.pid) } ?? false
-        let subtitle = quitting ? "正在退出" : running?.windowSummary ?? "未打开"
+        let subtitle = quitting ? Lang.tr("正在退出", "Quitting…") : running?.windowSummary ?? Lang.tr("未打开", "Not open")
         return ResultRow(icon: catalog.icon(for: app), title: app.name, subtitle: subtitle) {
             search.close()
             intents.open(app)

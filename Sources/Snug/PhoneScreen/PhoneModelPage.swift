@@ -16,10 +16,10 @@ struct PhoneModelPage: View {
         VStack(spacing: 0) {
             // 和 iOS 的导航栏一样：标题居中，右边「完成」
             ZStack {
-                Text("手机型号").font(PhoneStyle.headline)
+                Text(state.tr("手机型号", "Phone Model")).font(PhoneStyle.headline)
                 HStack {
                     Spacer()
-                    BarButton(title: "完成", bold: true) { pages.close() }
+                    BarButton(title: state.tr("完成", "Done"), bold: true) { pages.close() }
                 }
             }
             .frame(height: PhoneStyle.touchTarget)
@@ -28,7 +28,7 @@ struct PhoneModelPage: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     SearchBar {
-                        TextField("搜索型号", text: $pages.query).textFieldStyle(.plain)
+                        TextField(state.tr("搜索型号", "Search models"), text: $pages.query).textFieldStyle(.plain)
                         ClearButton(text: $pages.query)
                     }
                     content
@@ -45,18 +45,18 @@ struct PhoneModelPage: View {
         let brands = state.phones.search(query)
         LazyVStack(alignment: .leading, spacing: 24) {
             if query.isEmpty {
-                TitledSection("当前 · 手机屏按它调整比例") { CurrentPhone(choice: current) }
+                TitledSection(state.tr("当前 · 手机屏按它调整比例", "Current · The phone screen follows its ratio")) { CurrentPhone(choice: current) }
             }
             if brands.isEmpty {
                 if query.isEmpty {
-                    EmptyState(symbol: "iphone.gen3", title: "未读取到机型库", text: "可在下方自定义分辨率")
+                    EmptyState(symbol: "iphone.gen3", title: state.tr("未读取到机型库", "Model library unavailable"), text: state.tr("可在下方自定义分辨率", "You can enter a custom resolution below"))
                 } else {
-                    EmptyState(symbol: "magnifyingglass", title: "无结果", text: "没有与「\(query)」相符的型号")
+                    EmptyState(symbol: "magnifyingglass", title: state.tr("无结果", "No results"), text: state.tr("没有与「\(query)」相符的型号", "No models match “\(query)”"))
                 }
             }
             // 搜不到时也给自定义：列表里没有的手机就靠它
             if query.isEmpty || brands.isEmpty {
-                TitledSection("自定义") { CustomScreen(current: current) { choose(PhoneChoice(model: nil, screen: $0)) } }
+                TitledSection(state.tr("自定义", "Custom")) { CustomScreen(current: current) { choose(PhoneChoice(model: nil, screen: $0)) } }
             }
             ForEach(brands) { brand in
                 TitledSection(brand.name) {
@@ -108,10 +108,10 @@ private struct CustomScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                NumberField(placeholder: "宽", text: $width)
+                NumberField(placeholder: Lang.tr("宽", "Width"), text: $width)
                 Text("×").font(PhoneStyle.body).foregroundStyle(.secondary)
-                NumberField(placeholder: "高", text: $height)
-                PillButton(title: "使用") { screen.map(use) }
+                NumberField(placeholder: Lang.tr("高", "Height"), text: $height)
+                PillButton(title: Lang.tr("使用", "Use")) { screen.map(use) }
                     .disabled(screen == nil)
             }
             Text(PhoneScreen.customHint)

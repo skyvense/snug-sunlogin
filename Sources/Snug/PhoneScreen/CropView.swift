@@ -94,9 +94,9 @@ struct CropView: View {
         // 点按区域至少一个手指大（PressableStyle 按 label 的范围接点击）
         let side = PhoneStyle.touchTarget * metrics.scale
         return HStack {
-            Button(action: onCancel) { Text("取消").frame(minWidth: side, minHeight: side) }
+            Button(action: onCancel) { Text(Lang.tr("取消", "Cancel")).frame(minWidth: side, minHeight: side) }
             Spacer()
-            Button(action: done) { Text("完成").frame(minWidth: side, minHeight: side) }
+            Button(action: done) { Text(Lang.tr("完成", "Done")).frame(minWidth: side, minHeight: side) }
         }
         .font(.system(size: 18 * metrics.scale, weight: .semibold))
         .foregroundStyle(.white)

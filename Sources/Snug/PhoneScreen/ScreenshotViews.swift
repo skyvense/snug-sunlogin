@@ -18,14 +18,14 @@ struct ScreenshotThumbnail: View {
                     .aspectRatio(contentMode: .fill)
                     .frame(width: 48 * scale, height: 48 * scale)
                     .clipShape(RoundedRectangle(cornerRadius: 8 * scale, style: .continuous))
-                OverlayText(headline: "已复制截图", detail: "点按裁剪", scale: scale)
+                OverlayText(headline: Lang.tr("已复制截图", "Screenshot copied"), detail: Lang.tr("点按裁剪", "Tap to crop"), scale: scale)
             }
             .padding(12 * scale)
             .overlayCard(scale: scale)
         }
         .buttonStyle(PressableStyle())
         .fixedSize()
-        .accessibilityLabel("截图已复制，点按裁剪")
+        .accessibilityLabel(Lang.tr("截图已复制，点按裁剪", "Screenshot copied, tap to crop"))
     }
 }
 
