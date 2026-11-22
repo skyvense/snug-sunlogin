@@ -1254,19 +1254,19 @@ fn apply_ui_texts(hwnd: HWND) {
             "Adds a portrait screen for Sunlogin; removal disables the driver, creating re-enables it",
         ),
     );
-    set_text(model_label, tr("手机型号", "Phone model"));
+    set_text(model_label, tr("手机型号", "Model"));
     set_text(
         radio_auto,
         tr(
             "自动：主控连入建屏并打开资源库，断开删屏",
-            "Auto: create the screen and open the app library on connect, remove on disconnect",
+            "Auto: create on connect, remove on disconnect",
         ),
     );
     set_text(
         radio_manual,
         tr(
             "手动：用上面的按钮建屏、删屏",
-            "Manual: use the buttons above to create/remove the screen",
+            "Manual: use the buttons above",
         ),
     );
     set_text(btn_refresh, tr("刷新显示器", "Refresh displays"));
@@ -1904,7 +1904,7 @@ unsafe extern "system" fn main_wnd_proc(
             let model_label = mk_control(
                 hwnd,
                 "Static",
-                tr("手机型号", "Phone model"),
+                tr("手机型号", "Model"),
                 base,
                 0,
                 0,
@@ -1978,7 +1978,7 @@ unsafe extern "system" fn main_wnd_proc(
             let radio_auto = mk_control(
                 hwnd,
                 "Button",
-                tr("自动：主控连入建屏并打开资源库，断开删屏", "Auto: create the screen and open the app library on connect, remove on disconnect"),
+                tr("自动：主控连入建屏并打开资源库，断开删屏", "Auto: create on connect, remove on disconnect"),
                 base | WS_GROUP | WINDOW_STYLE(0x0009), // BS_AUTORADIOBUTTON
                 0,
                 0,
@@ -1990,7 +1990,7 @@ unsafe extern "system" fn main_wnd_proc(
             let radio_manual = mk_control(
                 hwnd,
                 "Button",
-                tr("手动：用上面的按钮建屏、删屏", "Manual: use the buttons above to create/remove the screen"),
+                tr("手动：用上面的按钮建屏、删屏", "Manual: use the buttons above"),
                 base | WINDOW_STYLE(0x0009), // BS_AUTORADIOBUTTON
                 0,
                 0,
