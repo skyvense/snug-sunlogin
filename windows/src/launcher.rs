@@ -202,6 +202,10 @@ pub fn move_to(rect: RECT) -> bool {
                     rect.bottom - rect.top,
                     SWP_NOZORDER,
                 );
+                // 必须整窗重绘：窗口类没注册 CS_HREDRAW/VREDRAW，尺寸被改小
+                // 时系统不主动重画，旧布局（按创建时客户区宽画的）会被裁着
+                // 留下——页签和关闭钮就是这样消失的（2026-11-22 实测）
+                let _ = InvalidateRect(Some(hwnd), None, true);
             }
             return true;
         }
@@ -309,6 +313,21 @@ pub fn open(rect: RECT) -> Result<(), String> {
                     s.hwnd = hwnd;
                 }
             });
+            // 创建瞬间若线程的 DPI 上下文和目标屏不一致，系统会按比例缩放
+            // 初始尺寸（实测 1080 被撑成 1890），内容随之按错宽度画出：
+            // 建完立刻按目标矩形钉回尺寸并整窗重绘，保证几何与绘制一致
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    SWP_NOZORDER,
+                );
+                let _ = InvalidateRect(Some(hwnd), None, true);
+            }
             Ok(())
         }
         Err(e) => {
