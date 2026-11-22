@@ -114,6 +114,13 @@ struct MainState {
     log_text: String,
     displays: Vec<DisplayInfo>,
     dpi: i32,
+    /// 四套字体随 DPI 重建（WM_DPICHANGED 里换新）：创建时的磅数只对创建
+    /// 所在屏成立，窗口被挪到 175% 的虚拟屏上时不重建，字号会和控件框
+    /// 对不上、排版错乱（2026-11-22 机主实测）。
+    ui_font: HFONT,
+    status_font: HFONT,
+    grp_font: HFONT,
+    log_font: HFONT,
     status_level: StatusLevel,
 }
 
@@ -1566,6 +1573,36 @@ fn restore_session_windows() {
     }
 }
 
+/// 把 state 里的四套字体按创建时的分工发给各控件（mk_control 创建时发过
+/// 一次；DPI 变化重建字体后要再发一遍，否则控件还抱着旧磅数）。
+fn apply_fonts(s: &MainState) {
+    let set = |hwnd: HWND, font: HFONT| unsafe {
+        SendMessageW(
+            hwnd,
+            WM_SETFONT,
+            Some(WPARAM(font.0 as usize)),
+            Some(LPARAM(1)),
+        );
+    };
+    set(s.status, s.status_font);
+    set(s.lbl_phone, s.grp_font);
+    set(s.log_edit, s.log_font);
+    for h in [
+        s.detail,
+        s.list,
+        s.btn_create,
+        s.btn_remove,
+        s.phone_hint,
+        s.model_label,
+        s.combo_model,
+        s.radio_auto,
+        s.radio_manual,
+        s.btn_refresh,
+    ] {
+        set(h, s.ui_font);
+    }
+}
+
 /// 按当前客户区重排一遍控件（模式切换后按钮行要出现/消失，跟一次布局）。
 fn relayout(hwnd: HWND) {
     let mut rc = windows::Win32::Foundation::RECT::default();
@@ -1883,6 +1920,10 @@ unsafe extern "system" fn main_wnd_proc(
                     log_text: String::new(),
                     displays: Vec::new(),
                     dpi,
+                    ui_font,
+                    status_font,
+                    grp_font,
+                    log_font,
                     status_level: StatusLevel::Neutral,
                 });
             });
@@ -2091,16 +2132,29 @@ unsafe extern "system" fn main_wnd_proc(
             LRESULT(card_brush().0 as isize)
         }
         WM_DPICHANGED => {
-            // 拖到不同 DPI 的屏上：更新缩放系数并按系统建议的新尺寸摆好
-            // （字体仍是创建时磅数，不跟着重建——单屏笔记本上碰不到，够用）
+            // 窗口落到不同 DPI 的屏上：更新缩放系数、按系统建议的新尺寸摆好，
+            // 并按新 DPI 重建字体与列表列宽。只改尺寸不重建字体时，字号停在
+            // 创建屏的磅数、和放大后的控件框对不上，排版会乱——黑屏模式下
+            // 主窗口被挪到 175% 的虚拟屏正是这条路（2026-11-22 机主实测）。
             let new_dpi = (wparam.0 & 0xffff) as i32;
+            let mut old_fonts: Vec<HFONT> = Vec::new();
             MAIN.with(|c| {
                 if let Some(s) = c.borrow_mut().as_mut() {
                     s.dpi = new_dpi;
+                    old_fonts = vec![s.ui_font, s.status_font, s.grp_font, s.log_font];
+                    s.ui_font = make_font("Microsoft YaHei UI", 10, 400, new_dpi);
+                    s.status_font = make_font("Microsoft YaHei UI", 12, 600, new_dpi);
+                    s.grp_font = make_font("Microsoft YaHei UI", 11, 600, new_dpi);
+                    s.log_font = make_font("Consolas", 10, 400, new_dpi);
+                    apply_fonts(s);
+                    init_list_columns(s.list, new_dpi);
                 }
             });
             let rect = lparam.0 as *const windows::Win32::Foundation::RECT;
             unsafe {
+                for f in old_fonts {
+                    let _ = DeleteObject(HGDIOBJ(f.0));
+                }
                 let r = *rect;
                 let _ = SetWindowPos(
                     hwnd,
@@ -2112,6 +2166,7 @@ unsafe extern "system" fn main_wnd_proc(
                     SWP_NOZORDER,
                 );
             }
+            relayout(hwnd);
             LRESULT(0)
         }
         session::WM_SESSION_START => {
