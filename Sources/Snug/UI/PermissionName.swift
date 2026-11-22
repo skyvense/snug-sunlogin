@@ -4,8 +4,14 @@ import PermissionFlow
 
 enum PermissionName {
     /// macOS 27 起叫「设备控制和数据访问」，更早叫「辅助功能」
-    static let accessibility = PermissionFlowResources.localizedString(
-        for: PermissionFlowResources.accessibilityName(), localeIdentifier: "zh-Hans")
+    static var accessibility: String {
+        PermissionFlowResources.localizedString(
+            for: PermissionFlowResources.accessibilityName(), localeIdentifier: Lang.english ? "en" : "zh-Hans")
+    }
     /// macOS 15 起叫「录屏与系统录音」，更早叫「屏幕录制」（PermissionFlow 只有旧叫法）
-    static let screenRecording = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15 ? "录屏与系统录音" : "屏幕录制"
+    static var screenRecording: String {
+        let recent = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 15
+        return Lang.english ? (recent ? "Screen & System Audio Recording" : "Screen Recording")
+                            : (recent ? "录屏与系统录音" : "屏幕录制")
+    }
 }
