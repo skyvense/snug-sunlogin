@@ -4,6 +4,7 @@
 //! 建屏/拆屏的实际动作都在 UI 线程做。消失要连续两次查不到才算断开，
 //! 防代理进程重启换代时闪断误拆。
 
+use crate::lang::tr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -40,7 +41,7 @@ pub fn spawn(hwnd_raw: usize) {
                 misses = 0;
                 if !present {
                     present = true;
-                    crate::log::write("会话监视：desktopagent 出现，通知主窗口（连入）");
+                    crate::log::write(tr("会话监视：desktopagent 出现，通知主窗口（连入）", "Session watch: desktopagent appeared, notifying the main window (connected)"));
                     post(hwnd_raw, WM_SESSION_START);
                 }
             } else if present {
@@ -48,7 +49,7 @@ pub fn spawn(hwnd_raw: usize) {
                 if misses >= 2 {
                     present = false;
                     misses = 0;
-                    crate::log::write("会话监视：desktopagent 连续两次查不到，通知主窗口（断开）");
+                    crate::log::write(tr("会话监视：desktopagent 连续两次查不到，通知主窗口（断开）", "Session watch: desktopagent missing twice in a row, notifying the main window (disconnected)"));
                     post(hwnd_raw, WM_SESSION_END);
                 }
             }

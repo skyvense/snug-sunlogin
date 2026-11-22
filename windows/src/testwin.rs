@@ -4,6 +4,8 @@
 //! 帧号大字显示，手机端一眼能看出画面有没有在动、动得匀不匀。
 
 use crate::display::wide;
+use crate::lang::tr;
+use crate::tr_fmt;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows::core::PCWSTR;
@@ -101,7 +103,7 @@ pub fn open(x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
     if is_open() {
         return Ok(());
     }
-    let hinstance = unsafe { GetModuleHandleW(None) }.map_err(|e| format!("GetModuleHandleW 失败：{e}"))?;
+    let hinstance = unsafe { GetModuleHandleW(None) }.map_err(|e| tr_fmt!("GetModuleHandleW 失败：{e}", "GetModuleHandleW failed: {e}"))?;
     let hinstance = HINSTANCE(hinstance.0);
     if !REGISTERED.swap(true, Ordering::SeqCst) {
         let class_w = wide(CLASS_NAME);
@@ -115,7 +117,7 @@ pub fn open(x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
         let atom = unsafe { RegisterClassW(&wc) };
         if atom == 0 {
             REGISTERED.store(false, Ordering::SeqCst);
-            return Err("RegisterClassW 失败".to_string());
+            return Err(tr("RegisterClassW 失败", "RegisterClassW failed").to_string());
         }
     }
     TEST.with(|c| {
@@ -139,7 +141,7 @@ pub fn open(x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
         });
     });
     let class_w = wide(CLASS_NAME);
-    let title_w = wide("Snug 串流测试");
+    let title_w = wide(tr("Snug 串流测试", "Snug Streaming Test"));
     let hwnd = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -157,7 +159,7 @@ pub fn open(x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
             None,
         )
     }
-    .map_err(|e| format!("CreateWindowExW 失败：{e}"))?;
+    .map_err(|e| tr_fmt!("CreateWindowExW 失败：{e}", "CreateWindowExW failed: {e}"))?;
     TEST.with(|c| {
         if let Some(s) = c.borrow_mut().as_mut() {
             s.hwnd = hwnd;
@@ -178,7 +180,7 @@ fn toggle_dynamic() {
         }
     });
     if !btn.is_invalid() {
-        let text = wide(if dynamic { "切到静态" } else { "切到动态" });
+        let text = wide(if dynamic { tr("切到静态", "Switch to static") } else { tr("切到动态", "Switch to dynamic") });
         unsafe {
             let _ = SetWindowTextW(btn, PCWSTR(text.as_ptr()));
         }
@@ -242,9 +244,9 @@ fn paint(hwnd: HWND) {
                 let _ = TextOutW(mem, 36, h / 2 - 200, &text);
                 SelectObject(mem, HGDIOBJ(s.font_mid.0));
                 let mode = if s.dynamic {
-                    "DYNAMIC · 60 FPS · 帧号持续在变"
+                    tr("DYNAMIC · 60 FPS · 帧号持续在变", "DYNAMIC · 60 FPS · frame counter keeps changing")
                 } else {
-                    "STATIC · 已冻结 · 画面不再变化"
+                    tr("STATIC · 已冻结 · 画面不再变化", "STATIC · frozen · the picture no longer changes")
                 };
                 let text = text16(mode);
                 let _ = TextOutW(mem, 36, h / 2 + 10, &text);
@@ -254,7 +256,7 @@ fn paint(hwnd: HWND) {
                     t.wHour, t.wMinute, t.wSecond, t.wMilliseconds
                 ));
                 let _ = TextOutW(mem, 36, h / 2 + 80, &text);
-                let text = text16("Esc 或点「关闭」退出 · 左上角按钮切换动/静");
+                let text = text16(tr("Esc 或点「关闭」退出 · 左上角按钮切换动/静", "Esc or the \"Close\" button to exit · top-left button switches dynamic/static"));
                 let _ = TextOutW(mem, 36, h - 70, &text);
                 SelectObject(mem, old_font);
 
@@ -298,8 +300,8 @@ unsafe extern "system" fn test_wnd_proc(
                 }
                 .unwrap_or_default()
             };
-            let btn_toggle = mk("切到静态", ID_TOGGLE, 16);
-            let _btn_close = mk("关闭", ID_CLOSE, 160);
+            let btn_toggle = mk(tr("切到静态", "Switch to static"), ID_TOGGLE, 16);
+            let _btn_close = mk(tr("关闭", "Close"), ID_CLOSE, 160);
             TEST.with(|c| {
                 if let Some(s) = c.borrow_mut().as_mut() {
                     s.btn_toggle = btn_toggle;

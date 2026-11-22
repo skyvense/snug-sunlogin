@@ -3,6 +3,8 @@
 //! 脚本等本进程退出后替换 exe 并重新拉起（运行中的 exe 覆盖不了自己）。
 //! 查询与下载都借 PowerShell（它解析 JSON、算哈希都现成），Rust 侧不引 HTTP 依赖。
 
+use crate::lang::tr;
+use crate::tr_fmt;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -69,7 +71,7 @@ pub fn spawn_check(hwnd_raw: usize, manual: bool) {
             }
         }
         Err(e) => {
-            crate::log::write(&format!("检查更新失败：{e}"));
+            crate::log::write(&tr_fmt!("检查更新失败：{e}", "Update check failed: {e}"));
             if manual {
                 *FAILURE.lock().unwrap() = Some(e);
                 post(hwnd_raw, WM_UPDATE_FAILED);
@@ -94,10 +96,10 @@ fn fetch_latest() -> Result<Latest, String> {
         .lines()
         .map(str::trim)
         .find(|l| l.contains('|'))
-        .ok_or_else(|| format!("查询发布失败（退出码 {exit}）：{}", output.trim()))?;
+        .ok_or_else(|| tr_fmt!("查询发布失败（退出码 {exit}）：{}", "Release query failed (exit code {exit}): {}", output.trim()))?;
     let parts: Vec<&str> = line.split('|').collect();
     if parts.len() != 3 || parts[1].is_empty() || parts[2].is_empty() {
-        return Err(format!("发布信息不完整：{line}"));
+        return Err(tr_fmt!("发布信息不完整：{line}", "Release info incomplete: {line}"));
     }
     Ok(Latest {
         version: parts[0].trim().trim_start_matches('v').to_string(),
@@ -120,7 +122,7 @@ pub fn spawn_prepare(hwnd_raw: usize, latest: Latest) {
     std::thread::spawn(move || match prepare(&latest) {
         Ok(()) => post(hwnd_raw, WM_UPDATE_READY),
         Err(e) => {
-            crate::log::write(&format!("准备更新失败：{e}"));
+            crate::log::write(&tr_fmt!("准备更新失败：{e}", "Preparing the update failed: {e}"));
             *FAILURE.lock().unwrap() = Some(e);
             post(hwnd_raw, WM_UPDATE_FAILED);
         }
@@ -130,7 +132,7 @@ pub fn spawn_prepare(hwnd_raw: usize, latest: Latest) {
 fn prepare(latest: &Latest) -> Result<(), String> {
     let dir = std::env::temp_dir().join("SnugWindowsUpdate");
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("建临时目录失败：{e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| tr_fmt!("建临时目录失败：{e}", "Creating the temp folder failed: {e}"))?;
     let zip = dir.join("update.zip");
     let sha = dir.join("update.zip.sha256");
     let out = dir.join("new");
@@ -139,7 +141,7 @@ fn prepare(latest: &Latest) -> Result<(), String> {
          Invoke-WebRequest '{sha_url}' -OutFile '{sha}' -TimeoutSec 60; \
          $want = ((Get-Content '{sha}') -split '\\s+')[0].ToUpper(); \
          $got = (Get-FileHash '{zip}' -Algorithm SHA256).Hash.ToUpper(); \
-         if ($want -ne $got) {{ throw \"SHA256 对不上，期望 $want 实际 $got\" }}; \
+         if ($want -ne $got) {{ throw \"SHA256 mismatch, expected $want got $got\" }}; \
          Expand-Archive '{zip}' -DestinationPath '{out}' -Force; 'DONE'",
         zip_url = latest.zip_url,
         sha_url = latest.sha_url,
@@ -152,10 +154,8 @@ fn prepare(latest: &Latest) -> Result<(), String> {
         &["-NoProfile", "-Command", &script],
     );
     if exit != 0 || !output.contains("DONE") {
-        return Err(format!(
-            "下载/验包/解压失败（退出码 {exit}）：{}",
-            output.trim()
-        ));
+        return Err(tr_fmt!("下载/验包/解压失败（退出码 {exit}）：{}", "Download/verify/extract failed (exit code {exit}): {}",
+            output.trim()));
     }
     // 换文件脚本：等本进程退出 → 覆盖 exe 与安装脚本 → 重新拉起。
     // 本进程是管理员权限，拉起的 PowerShell 子进程继承权限，覆盖无需再提权。
@@ -175,11 +175,11 @@ fn prepare(latest: &Latest) -> Result<(), String> {
         }\n\
         Start-Process (Join-Path $Dst 'SnugWindows.exe')\n";
     let swap_path = dir.join("swap.ps1");
-    std::fs::write(&swap_path, swap).map_err(|e| format!("写换文件脚本失败：{e}"))?;
-    let exe = std::env::current_exe().map_err(|e| format!("找不到本程序路径：{e}"))?;
+    std::fs::write(&swap_path, swap).map_err(|e| tr_fmt!("写换文件脚本失败：{e}", "Writing the swap script failed: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| tr_fmt!("找不到本程序路径：{e}", "Cannot find this program's path: {e}"))?;
     let dst = exe
         .parent()
-        .ok_or("本程序不在任何目录里")?
+        .ok_or(tr("本程序不在任何目录里", "This program is not in any directory"))?
         .to_path_buf();
     *SWAP_JOB.lock().unwrap() = Some((swap_path, out, dst));
     Ok(())
@@ -193,7 +193,7 @@ pub fn launch_swap() -> Result<(), String> {
         .lock()
         .unwrap()
         .take()
-        .ok_or("没有待执行的更新")?;
+        .ok_or(tr("没有待执行的更新", "No pending update"))?;
     std::process::Command::new("powershell.exe")
         .args([
             "-NoProfile",
@@ -209,6 +209,6 @@ pub fn launch_swap() -> Result<(), String> {
         ])
         .creation_flags(0x0000_0008) // DETACHED_PROCESS：不随本进程退出被带走
         .spawn()
-        .map_err(|e| format!("拉起换文件脚本失败：{e}"))?;
+        .map_err(|e| tr_fmt!("拉起换文件脚本失败：{e}", "Starting the swap script failed: {e}"))?;
     Ok(())
 }

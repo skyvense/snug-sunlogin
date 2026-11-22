@@ -2,6 +2,7 @@
 //! EnumDisplaySettings / ChangeDisplaySettingsEx），任何语言区域设置下结果一致，
 //! 不碰驱动私有接口：虚拟屏是 VDD 驱动提供的普通显示器。
 
+use crate::lang::tr;
 use windows::core::PCWSTR;
 use windows::Win32::Graphics::Gdi::*;
 
@@ -46,13 +47,13 @@ impl DisplayInfo {
             self.device_name, self.adapter_name, self.width, self.height, self.hz, self.x, self.y
         );
         if self.primary {
-            s += " · 主屏";
+            s += tr(" · 主屏", " · Primary");
         }
         if self.is_virtual() {
-            s += " · VDD 虚拟屏";
+            s += tr(" · VDD 虚拟屏", " · VDD virtual screen");
         }
         if self.is_phone_mode() {
-            s += " · 手机屏模式";
+            s += tr(" · 手机屏模式", " · Phone-screen mode");
         }
         if !self.monitor_name.is_empty() {
             s += &format!(" · {}", self.monitor_name);

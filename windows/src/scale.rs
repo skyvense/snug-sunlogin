@@ -9,6 +9,8 @@
 //! 设置后一律读回该屏 DC 的有效 DPI 验证，没到位如实报错，不假报。
 
 use crate::display::wide;
+use crate::lang::tr;
+use crate::tr_fmt;
 use std::time::Duration;
 use windows::core::PCWSTR;
 use windows::Win32::Devices::Display::*;
@@ -55,7 +57,7 @@ fn find_source(device_name: &str) -> Result<(LUID, u32), String> {
         let flags = QDC_ONLY_ACTIVE_PATHS;
         let (mut npaths, mut nmodes) = (0u32, 0u32);
         if GetDisplayConfigBufferSizes(flags, &mut npaths, &mut nmodes) != WIN32_ERROR(0) {
-            return Err("读取显示拓扑尺寸失败".into());
+            return Err(tr("读取显示拓扑尺寸失败", "Failed to read the display topology size").into());
         }
         let mut paths: Vec<DISPLAYCONFIG_PATH_INFO> = Vec::new();
         let mut modes: Vec<DISPLAYCONFIG_MODE_INFO> = Vec::new();
@@ -74,7 +76,7 @@ fn find_source(device_name: &str) -> Result<(LUID, u32), String> {
             None,
         );
         if rc != WIN32_ERROR(0) {
-            return Err(format!("读取显示拓扑失败（错误码 {}）", rc.0));
+            return Err(tr_fmt!("读取显示拓扑失败（错误码 {}）", "Failed to read the display topology (error code {})", rc.0));
         }
         paths.truncate(npaths as usize);
         for p in &paths {
@@ -91,7 +93,7 @@ fn find_source(device_name: &str) -> Result<(LUID, u32), String> {
                 }
             }
         }
-        Err(format!("显示拓扑里找不到 {device_name}"))
+        Err(tr_fmt!("显示拓扑里找不到 {device_name}", "Display {device_name} not found in the topology"))
     }
 }
 
@@ -131,7 +133,7 @@ pub fn query(device_name: &str) -> Result<ScaleInfo, String> {
     req.header.id = id;
     let rc = unsafe { DisplayConfigGetDeviceInfo(&mut req.header) };
     if rc != 0 {
-        return Err(format!("读取缩放步数失败（返回 {rc}）"));
+        return Err(tr_fmt!("读取缩放步数失败（返回 {rc}）", "Failed to read the scaling steps (returned {rc})"));
     }
     let [a, b, c] = req.fields;
     let (min_rel, max_rel, rel) = if a <= c && c <= b {
@@ -139,9 +141,9 @@ pub fn query(device_name: &str) -> Result<ScaleInfo, String> {
     } else if a <= b && b <= c {
         (a, c, b) // (min, cur, max)
     } else {
-        return Err(format!("缩放步数读数不合常理（{a}, {b}, {c}），不敢动"));
+        return Err(tr_fmt!("缩放步数读数不合常理（{a}, {b}, {c}），不敢动", "Scaling step readings look wrong ({a}, {b}, {c}); not touching them"));
     };
-    let percent = percent_of(device_name).ok_or("读不到这块屏的有效 DPI")?;
+    let percent = percent_of(device_name).ok_or(tr("读不到这块屏的有效 DPI", "No valid DPI for this display"))?;
     let rec_idx = (ladder_index(percent) as i32 - rel).clamp(0, SCALE_LADDER.len() as i32 - 1);
     Ok(ScaleInfo {
         percent,
@@ -163,7 +165,7 @@ pub fn set_rel(device_name: &str, rel: i32) -> Result<(), String> {
     req.scale_rel = rel;
     let rc = unsafe { DisplayConfigSetDeviceInfo(&req.header) };
     if rc != 0 {
-        return Err(format!("设置缩放步数失败（返回 {rc}）"));
+        return Err(tr_fmt!("设置缩放步数失败（返回 {rc}）", "Failed to set the scaling steps (returned {rc})"));
     }
     Ok(())
 }
@@ -176,5 +178,5 @@ pub fn set_percent(device_name: &str, target: u32) -> Result<u32, String> {
         .clamp(rec_idx + info.min_rel, rec_idx + info.max_rel);
     set_rel(device_name, target_idx - rec_idx)?;
     std::thread::sleep(Duration::from_millis(400));
-    percent_of(device_name).ok_or_else(|| "设置后读不回有效 DPI".to_string())
+    percent_of(device_name).ok_or_else(|| tr("设置后读不回有效 DPI", "Cannot read back a valid DPI after setting").to_string())
 }

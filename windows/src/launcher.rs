@@ -7,7 +7,7 @@
 
 use crate::apps::{self, InstalledApp, RunningWindow};
 use crate::display::wide;
-use crate::lang::tr;
+use crate::lang::tr as trs;
 use crate::tr_fmt;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -290,7 +290,7 @@ fn scan_apps_data() -> AppsData {
         crate::log::write(&tr_fmt!("  频率：{} 启动 {} 次{}", "  Usage: {} launched {} time(s){}",
             a.name,
             u.count,
-            if apps::is_common_app(a) { tr("（常用）", " (common)") } else { "" }));
+            if apps::is_common_app(a) { trs("（常用）", " (common)") } else { "" }));
     }
     AppsData {
         installed,
@@ -340,7 +340,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
     crate::log::write(&tr_fmt!("资源库：运行中 {} 个窗口，全部 {} 个 App（数据{}，备数据 {} ms）", "App library: {} running window(s), {} apps in All (data {}, prepared in {} ms)",
         running.len(),
         installed.len(),
-        if from_cache { tr("来自缓存", "from cache") } else { tr("全量扫描", "full scan") },
+        if from_cache { trs("来自缓存", "from cache") } else { trs("全量扫描", "full scan") },
         t0.elapsed().as_millis()));
     for w in &running {
         crate::log::write(&tr_fmt!("  运行中：{}（pid {}）— {}", "  Running: {} (pid {}) — {}",
@@ -368,7 +368,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
         });
     });
     let class_w = wide(LAUNCHER_CLASS);
-    let title_w = wide(tr("App 资源库", "App Library"));
+    let title_w = wide(trs("App 资源库", "App Library"));
     let created = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -842,7 +842,7 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                 commons.truncate(18);
                 if !commons.is_empty() {
                     out.push(Item {
-                        name: tr("常用 · 未打开", "Common · Not open").to_string(),
+                        name: trs("常用 · 未打开", "Common · Not open").to_string(),
                         sub: String::new(),
                         icon_path: String::new(),
                         running: false,
@@ -879,9 +879,9 @@ fn current_items(s: &LauncherState) -> Vec<Item> {
                 Item {
                     name: a.name.clone(),
                     sub: if running {
-                        tr("运行中", "Running").to_string()
+                        trs("运行中", "Running").to_string()
                     } else if recent {
-                        tr("最近使用", "Recent").to_string()
+                        trs("最近使用", "Recent").to_string()
                     } else {
                         String::new()
                     },
@@ -1333,8 +1333,8 @@ fn paint(hwnd: HWND) {
             };
             fill_rounded(mem, track, rgb(231, 231, 235), 0);
             for (rcx, label, active) in [
-                (run_rc, tr("运行中", "Running"), tab == Tab::Running),
-                (all_rc, tr("全部", "All"), tab == Tab::All),
+                (run_rc, trs("运行中", "Running"), tab == Tab::Running),
+                (all_rc, trs("全部", "All"), tab == Tab::All),
             ] {
                 if active {
                     fill_rounded(mem, rcx, rgb(255, 172, 42), 3);
@@ -1380,8 +1380,8 @@ fn paint(hwnd: HWND) {
                     bottom: CONTENT_TOP + 110,
                 };
                 let msg = match tab {
-                    Tab::Running => tr("没有正在运行的 App", "No running apps"),
-                    Tab::All => tr("没有找到 App", "No apps found"),
+                    Tab::Running => trs("没有正在运行的 App", "No running apps"),
+                    Tab::All => trs("没有找到 App", "No apps found"),
                 };
                 draw_text(mem, msg, &mut tr, DT_CENTER | DT_SINGLELINE);
             }
@@ -1466,7 +1466,7 @@ fn paint(hwnd: HWND) {
                             (
                                 expand_chip_rect(item, r, w),
                                 if item.expanded {
-                                    tr("收起 ▴", "Collapse ▴").to_string()
+                                    trs("收起 ▴", "Collapse ▴").to_string()
                                 } else {
                                     tr_fmt!("{} 窗 ▾", "{} win ▾", item.win_count)
                                 },
@@ -1593,7 +1593,7 @@ unsafe extern "system" fn launcher_proc(
                         );
                     }
                     // EM_SETCUEBANNER = 0x1501：空框时显示灰色提示词
-                    let cue = wide(tr("搜索 App", "Search apps"));
+                    let cue = wide(trs("搜索 App", "Search apps"));
                     let _ = SendMessageW(
                         search,
                         0x1501,

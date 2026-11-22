@@ -3,6 +3,7 @@
 //! （所以用字符串手术而不是 XML 解析重序列化）；第一次动手前留一份原始备份
 //! （.snug-pristine.bak，永不覆盖）；动过什么记在状态文件里，以便原样恢复。
 
+use crate::lang::tr;
 use crate::phones;
 use std::path::Path;
 
@@ -186,7 +187,7 @@ pub fn has_phone_resolution(text: &str) -> bool {
 pub fn resolution_summary(text: &str) -> String {
     let blocks = resolution_blocks(text);
     if blocks.is_empty() {
-        return "（一条分辨率都没有）".to_string();
+        return tr("（一条分辨率都没有）", "(no resolutions at all)").to_string();
     }
     blocks
         .iter()
@@ -320,7 +321,7 @@ mod tests {
         assert_eq!(resolution_summary(SAMPLE), "1920×1080@144");
         let doc = add_phone_resolution(SAMPLE);
         assert_eq!(resolution_summary(&doc), "1920×1080@144、1080×2346@60");
-        assert_eq!(resolution_summary("<vdd_settings/>"), "（一条分辨率都没有）");
+        assert_eq!(resolution_summary("<vdd_settings/>"), tr("（一条分辨率都没有）", "(no resolutions at all)"));
     }
 
     #[test]

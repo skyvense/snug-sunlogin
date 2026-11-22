@@ -2,6 +2,8 @@
 //! 枚举走 PowerShell 的 Get-PnpDevice 并拼成竖线分隔的纯文本——不依赖 JSON 解析，
 //! 也不解析 pnputil 的本地化文本输出（只用它的退出码）。
 
+use crate::lang::tr;
+use crate::tr_fmt;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 
@@ -26,7 +28,7 @@ pub fn run(program: &str, args: &[&str]) -> (i32, String) {
             text.push_str(&String::from_utf8_lossy(&o.stderr));
             (o.status.code().unwrap_or(-1), text)
         }
-        Err(e) => (-1, format!("启动 {program} 失败：{e}")),
+        Err(e) => (-1, tr_fmt!("启动 {program} 失败：{e}", "Failed to start {program}: {e}")),
     }
 }
 
@@ -41,10 +43,8 @@ pub fn display_adapters() -> Result<Vec<PnpDevice>, String> {
         &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
     );
     if exit != 0 {
-        return Err(format!(
-            "Get-PnpDevice 失败（退出码 {exit}）：{}",
-            output.trim()
-        ));
+        return Err(tr_fmt!("Get-PnpDevice 失败（退出码 {exit}）：{}", "Get-PnpDevice failed (exit code {exit}): {}",
+            output.trim()));
     }
     let mut devices = Vec::new();
     for line in output.lines() {
@@ -78,10 +78,8 @@ pub fn problem_devices() -> Result<Vec<PnpDevice>, String> {
         &["-NoProfile", "-NonInteractive", "-Command", script],
     );
     if exit != 0 {
-        return Err(format!(
-            "Get-PnpDevice（问题设备）失败（退出码 {exit}）：{}",
-            output.trim()
-        ));
+        return Err(tr_fmt!("Get-PnpDevice（问题设备）失败（退出码 {exit}）：{}", "Get-PnpDevice (problem devices) failed (exit code {exit}): {}",
+            output.trim()));
     }
     let mut devices = Vec::new();
     for line in output.lines() {

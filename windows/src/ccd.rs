@@ -8,6 +8,8 @@
 //! 只有 SetDisplayConfig 把路径重新激活才行（等价于在设置里手动选
 //! 「扩展这些显示器」并保留更改，真机已验）。
 
+use crate::lang::tr;
+use crate::tr_fmt;
 use windows::Win32::Devices::Display::*;
 use windows::Win32::Foundation::POINTL;
 
@@ -91,7 +93,7 @@ fn target_name(path: &DISPLAYCONFIG_PATH_INFO) -> (String, String) {
 
 /// 只查不改：VDD 路径在不在、激活与否。
 pub fn vdd_path_state() -> Result<Outcome, String> {
-    let (paths, _modes) = query_all().map_err(|e| format!("查询显示拓扑失败（错误码 {e}）"))?;
+    let (paths, _modes) = query_all().map_err(|e| tr_fmt!("查询显示拓扑失败（错误码 {e}）", "Failed to query the display topology (error code {e})"))?;
     let mut out = Outcome {
         found: false,
         was_active: false,
@@ -103,14 +105,12 @@ pub fn vdd_path_state() -> Result<Outcome, String> {
         if is_vdd_target(&friendly, &devpath) {
             out.found = true;
             out.was_active = p.flags & PATH_ACTIVE != 0;
-            out.notes.push(format!(
-                "VDD 路径：目标「{friendly}」，激活={}",
-                if out.was_active { "是" } else { "否" }
-            ));
+            out.notes.push(tr_fmt!("VDD 路径：目标「{friendly}」，激活={}", "VDD path: target \"{friendly}\", active={}",
+                if out.was_active { tr("是", "yes") } else { tr("否", "no") }));
         }
     }
     if !out.found {
-        out.notes.push("拓扑里没有 VDD 的显示路径".to_string());
+        out.notes.push(tr("拓扑里没有 VDD 的显示路径", "No VDD display path in the topology").to_string());
     }
     Ok(out)
 }
@@ -119,7 +119,7 @@ pub fn vdd_path_state() -> Result<Outcome, String> {
 /// 模式索引失效时按当前手机屏规格补源/目标模式，源位置接在现有桌面最右侧。
 pub fn activate_vdd() -> Result<Outcome, String> {
     let (mut paths, mut modes) =
-        query_all().map_err(|e| format!("查询显示拓扑失败（错误码 {e}）"))?;
+        query_all().map_err(|e| tr_fmt!("查询显示拓扑失败（错误码 {e}）", "Failed to query the display topology (error code {e})"))?;
     let mut out = Outcome {
         found: false,
         was_active: false,
@@ -129,18 +129,16 @@ pub fn activate_vdd() -> Result<Outcome, String> {
     let Some(idx) = paths.iter().position(|p| {
         let (friendly, devpath) = target_name(p);
         if is_vdd_target(&friendly, &devpath) {
-            out.notes.push(format!(
-                "VDD 路径：目标「{friendly}」，激活={}，源模式索引 {}，目标模式索引 {}",
-                if p.flags & PATH_ACTIVE != 0 { "是" } else { "否" },
+            out.notes.push(tr_fmt!("VDD 路径：目标「{friendly}」，激活={}，源模式索引 {}，目标模式索引 {}", "VDD path: target \"{friendly}\", active={}, source mode index {}, target mode index {}",
+                if p.flags & PATH_ACTIVE != 0 { tr("是", "yes") } else { tr("否", "no") },
                 unsafe { p.sourceInfo.Anonymous.modeInfoIdx },
-                unsafe { p.targetInfo.Anonymous.modeInfoIdx },
-            ));
+                unsafe { p.targetInfo.Anonymous.modeInfoIdx },));
             true
         } else {
             false
         }
     }) else {
-        out.notes.push("拓扑里没有 VDD 的显示路径".to_string());
+        out.notes.push(tr("拓扑里没有 VDD 的显示路径", "No VDD display path in the topology").to_string());
         return Ok(out);
     };
     out.found = true;
@@ -183,7 +181,7 @@ pub fn activate_vdd() -> Result<Outcome, String> {
             });
             paths[idx].sourceInfo.Anonymous.modeInfoIdx = (modes.len() - 1) as u32;
             out.notes
-                .push(format!("源模式索引失效，已补 {pw}×{ph} 源模式（位置 {right},0）"));
+                .push(tr_fmt!("源模式索引失效，已补 {pw}×{ph} 源模式（位置 {right},0）", "Source mode index was invalid; added a {pw}×{ph} source mode (position {right},0)"));
         }
         if paths[idx].targetInfo.Anonymous.modeInfoIdx == MODE_IDX_INVALID {
             let mut signal = DISPLAYCONFIG_VIDEO_SIGNAL_INFO::default();
@@ -218,7 +216,7 @@ pub fn activate_vdd() -> Result<Outcome, String> {
             };
             paths[idx].targetInfo.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
             out.notes
-                .push(format!("目标模式索引失效，已补 {pw}×{ph}@{phz} 目标模式"));
+                .push(tr_fmt!("目标模式索引失效，已补 {pw}×{ph}@{phz} 目标模式", "Target mode index was invalid; added a {pw}×{ph}@{phz} target mode"));
         }
     }
 
@@ -230,7 +228,7 @@ pub fn activate_vdd() -> Result<Outcome, String> {
         )
     };
     out.notes
-        .push(format!("SetDisplayConfig 返回 {rc}（0 = 成功）"));
+        .push(tr_fmt!("SetDisplayConfig 返回 {rc}（0 = 成功）", "SetDisplayConfig returned {rc} (0 = success)"));
     out.applied = rc == 0;
     Ok(out)
 }
@@ -297,7 +295,7 @@ fn find_mode(
 /// 万一程序异常退出，下次开机物理屏自动回来——这是最后一道保险。
 pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
     let (mut paths, mut modes) =
-        query_all().map_err(|e| format!("查询显示拓扑失败（错误码 {e}）"))?;
+        query_all().map_err(|e| tr_fmt!("查询显示拓扑失败（错误码 {e}）", "Failed to query the display topology (error code {e})"))?;
     let mut out = PhysicalOutcome {
         applied: false,
         changed: 0,
@@ -309,25 +307,23 @@ pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
         is_vdd_target(&friendly, &devpath) && p.flags & PATH_ACTIVE != 0
     });
     if !vdd_active {
-        return Err("VDD 虚拟屏路径不在或未激活，已放弃关物理屏（避免无屏可用）".to_string());
+        return Err(tr("VDD 虚拟屏路径不在或未激活，已放弃关物理屏（避免无屏可用）", "The VDD virtual screen path is missing or inactive; giving up on turning off the physical displays (to avoid ending up with no usable screen)").to_string());
     }
     let phys = physical_paths(&paths);
     // 历史路径大多本来就关着，只记开着的（要关的就是它们），其余给个总数即可
     for (idx, name, active) in &phys {
         if *active {
             out.notes
-                .push(format!("关掉物理屏：目标「{name}」"));
+                .push(tr_fmt!("关掉物理屏：目标「{name}」", "Turning off physical displays: target \"{name}\""));
             paths[*idx].flags &= !PATH_ACTIVE;
             out.changed += 1;
         }
     }
-    out.notes.push(format!(
-        "物理屏路径共 {} 条，本次关掉 {} 条",
+    out.notes.push(tr_fmt!("物理屏路径共 {} 条，本次关掉 {} 条", "Physical display paths: {} in total, turning off {} this time",
         phys.len(),
-        out.changed
-    ));
+        out.changed));
     if out.changed == 0 {
-        out.notes.push("没有处于开启状态的物理屏，无需处理".to_string());
+        out.notes.push(tr("没有处于开启状态的物理屏，无需处理", "No physical display is on; nothing to do").to_string());
         return Ok(out);
     }
     // 关掉物理屏后，剩下的虚拟屏必须顶到原点 (0,0)：SetDisplayConfig 要求至少
@@ -340,14 +336,14 @@ pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
         Some(vdd_idx) => {
             let smi = unsafe { paths[vdd_idx].sourceInfo.Anonymous.modeInfoIdx };
             if smi == MODE_IDX_INVALID {
-                return Err("虚拟屏的源模式索引失效，放弃关物理屏".to_string());
+                return Err(tr("虚拟屏的源模式索引失效，放弃关物理屏", "The virtual screen's source mode index is invalid; giving up on turning off the physical displays").to_string());
             }
             if let Some(m) = modes.get_mut(smi as usize) {
                 m.Anonymous.sourceMode.position = POINTL { x: 0, y: 0 };
-                out.notes.push("虚拟屏源位置移到 (0,0) 顶替主屏".to_string());
+                out.notes.push(tr("虚拟屏源位置移到 (0,0) 顶替主屏", "Virtual screen source moved to (0,0) to take over as primary").to_string());
             }
         }
-        None => return Err("关物理屏前复查不到激活的虚拟屏路径，放弃".to_string()),
+        None => return Err(tr("关物理屏前复查不到激活的虚拟屏路径，放弃", "No active virtual screen path found in the final check before turning off physical displays; giving up").to_string()),
     }
     let rc = unsafe {
         SetDisplayConfig(
@@ -357,13 +353,13 @@ pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
         )
     };
     out.notes
-        .push(format!("SetDisplayConfig 返回 {rc}（0 = 成功，未存盘）"));
+        .push(tr_fmt!("SetDisplayConfig 返回 {rc}（0 = 成功，未存盘）", "SetDisplayConfig returned {rc} (0 = success, not saved)"));
     if rc != 0 {
         return Ok(out);
     }
     // 复查：物理屏应当全部不激活，VDD 应当还在
     let (paths2, _m2) =
-        query_all().map_err(|e| format!("关物理屏后复查拓扑失败（错误码 {e}）"))?;
+        query_all().map_err(|e| tr_fmt!("关物理屏后复查拓扑失败（错误码 {e}）", "Rechecking the topology after turning off physical displays failed (error code {e})"))?;
     let still_on = physical_paths(&paths2)
         .iter()
         .filter(|(_, _, a)| *a)
@@ -372,10 +368,8 @@ pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
         let (friendly, devpath) = target_name(p);
         is_vdd_target(&friendly, &devpath) && p.flags & PATH_ACTIVE != 0
     });
-    out.notes.push(format!(
-        "复查：仍开着的物理屏 {still_on} 块，VDD 激活={}",
-        if vdd_still { "是" } else { "否" }
-    ));
+    out.notes.push(tr_fmt!("复查：仍开着的物理屏 {still_on} 块，VDD 激活={}", "Recheck: {} physical display(s) still on, VDD active={}",
+        if vdd_still { tr("是", "yes") } else { tr("否", "no") }));
     out.applied = still_on == 0 && vdd_still;
     Ok(out)
 }
@@ -395,15 +389,13 @@ pub fn restore_physicals() -> Result<PhysicalOutcome, String> {
         Err(e) => PhysicalOutcome {
             applied: false,
             changed: 1,
-            notes: vec![format!("路径手术失败：{e}")],
+            notes: vec![tr_fmt!("路径手术失败：{e}", "Path surgery failed: {e}")],
         },
     };
-    out.notes.push("改用存盘拓扑整体恢复".to_string());
+    out.notes.push(tr("改用存盘拓扑整体恢复", "Falling back to applying the saved topology as a whole").to_string());
     if let Err(fe) = apply_database_config(&mut out) {
-        return Err(format!(
-            "{fe}；路径手术同样未生效：{}",
-            out.notes.join("；")
-        ));
+        return Err(tr_fmt!("{fe}；路径手术同样未生效：{}", "{fe}; the path surgery also had no effect: {}",
+            out.notes.join("；")));
     }
     Ok(out)
 }
@@ -413,19 +405,17 @@ pub fn restore_physicals() -> Result<PhysicalOutcome, String> {
 fn apply_database_config(out: &mut PhysicalOutcome) -> Result<(), String> {
     let rc = unsafe { SetDisplayConfig(None, None, SDC_APPLY | SDC_USE_DATABASE_CURRENT) };
     out.notes
-        .push(format!("套用存盘拓扑：SetDisplayConfig 返回 {rc}（0 = 成功）"));
+        .push(tr_fmt!("套用存盘拓扑：SetDisplayConfig 返回 {rc}（0 = 成功）", "Applying the saved topology: SetDisplayConfig returned {rc} (0 = success)"));
     if rc != 0 {
-        return Err(format!("套用存盘拓扑失败（错误码 {rc}）"));
+        return Err(tr_fmt!("套用存盘拓扑失败（错误码 {rc}）", "Applying the saved topology failed (error code {rc})"));
     }
     let (paths2, _m) =
-        query_all().map_err(|e| format!("套用存盘拓扑后复查拓扑失败（错误码 {e}）"))?;
+        query_all().map_err(|e| tr_fmt!("套用存盘拓扑后复查拓扑失败（错误码 {e}）", "Rechecking the topology after applying the saved topology failed (error code {e})"))?;
     let any_on = physical_paths(&paths2).iter().any(|(_, _, a)| *a);
-    out.notes.push(format!(
-        "复查：物理屏有激活路径={}",
-        if any_on { "是" } else { "否" }
-    ));
+    out.notes.push(tr_fmt!("复查：物理屏有激活路径={}", "Recheck: a physical display has an active path={}",
+        if any_on { tr("是", "yes") } else { tr("否", "no") }));
     if !any_on {
-        return Err("套用存盘拓扑后物理屏仍未激活".to_string());
+        return Err(tr("套用存盘拓扑后物理屏仍未激活", "Physical displays still not active after applying the saved topology").to_string());
     }
     out.applied = true;
     Ok(())
@@ -433,7 +423,7 @@ fn apply_database_config(out: &mut PhysicalOutcome) -> Result<(), String> {
 
 fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
     let (mut paths, mut modes) =
-        query_all().map_err(|e| format!("查询显示拓扑失败（错误码 {e}）"))?;
+        query_all().map_err(|e| tr_fmt!("查询显示拓扑失败（错误码 {e}）", "Failed to query the display topology (error code {e})"))?;
     let mut out = PhysicalOutcome {
         applied: false,
         changed: 0,
@@ -480,7 +470,7 @@ fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
         chosen.push(pick);
     }
     if off_groups == 0 {
-        out.notes.push("物理屏本来就全部开着，无需恢复".to_string());
+        out.notes.push(tr("物理屏本来就全部开着，无需恢复", "All physical displays are already on; no restore needed").to_string());
         return Ok(out);
     }
     // 给关着的组补齐模式索引并激活
@@ -506,7 +496,7 @@ fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
                 {
                     paths[i].sourceInfo.Anonymous.modeInfoIdx = mi;
                     out.notes
-                        .push("物理屏源模式索引失效，已借用同源的历史模式".to_string());
+                        .push(tr("物理屏源模式索引失效，已借用同源的历史模式", "A physical display's source mode index was invalid; borrowed a historical mode from the same source").to_string());
                 }
             }
             if paths[i].targetInfo.Anonymous.modeInfoIdx == MODE_IDX_INVALID {
@@ -517,13 +507,13 @@ fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
                 {
                     paths[i].targetInfo.Anonymous.modeInfoIdx = mi;
                     out.notes
-                        .push("物理屏目标模式索引失效，已借用同目标的历史模式".to_string());
+                        .push(tr("物理屏目标模式索引失效，已借用同目标的历史模式", "A physical display's target mode index was invalid; borrowed a historical mode for the same target").to_string());
                 }
             }
             if paths[i].targetInfo.Anonymous.modeInfoIdx == MODE_IDX_INVALID {
                 let smi = paths[i].sourceInfo.Anonymous.modeInfoIdx;
                 if smi == MODE_IDX_INVALID {
-                    return Err("物理屏的源/目标模式都缺失，无法恢复（请重启或在设置→显示里手动开启）".to_string());
+                    return Err(tr("物理屏的源/目标模式都缺失，无法恢复（请重启或在设置→显示里手动开启）", "Both source and target modes are missing for a physical display; cannot restore (reboot, or turn it on manually under Settings → Display)").to_string());
                 }
                 let sm = modes[smi as usize].Anonymous.sourceMode;
                 let (w, h, hz) = (sm.width, sm.height, 60u32);
@@ -560,16 +550,16 @@ fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
                 paths[i].targetInfo.scanLineOrdering =
                     DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
                 out.notes
-                    .push(format!("物理屏目标模式缺失，已按源模式现造 {w}×{h}@{hz}"));
+                    .push(tr_fmt!("物理屏目标模式缺失，已按源模式现造 {w}×{h}@{hz}", "A physical display's target mode was missing; created {w}×{h}@{hz} from its source mode"));
             }
             if paths[i].sourceInfo.Anonymous.modeInfoIdx == MODE_IDX_INVALID {
-                return Err("物理屏的源模式缺失且无处可借，无法恢复（请重启或在设置→显示里手动开启）".to_string());
+                return Err(tr("物理屏的源模式缺失且无处可借，无法恢复（请重启或在设置→显示里手动开启）", "A physical display's source mode is missing with nothing to borrow; cannot restore (reboot, or turn it on manually under Settings → Display)").to_string());
             }
         }
         paths[i].flags |= PATH_ACTIVE;
         out.changed += 1;
         let (friendly, _dp) = target_name(&paths[i]);
-        out.notes.push(format!("恢复物理屏：目标「{friendly}」"));
+        out.notes.push(tr_fmt!("恢复物理屏：目标「{friendly}」", "Restoring physical display: target \"{friendly}\""));
     }
     // 位置统一重排：各组代表路径的源模式从 (0,0) 向右排，VDD 在场时排最右。
     // 源模式可能被同源的多条路径共享，改一次即可；重复改同一模式结果一致。
@@ -602,13 +592,13 @@ fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
         )
     };
     out.notes
-        .push(format!("SetDisplayConfig 返回 {rc}（0 = 成功）"));
+        .push(tr_fmt!("SetDisplayConfig 返回 {rc}（0 = 成功）", "SetDisplayConfig returned {rc} (0 = success)"));
     if rc != 0 {
         return Ok(out);
     }
     // 复查：每个物理目标都应至少有一条激活路径（历史路径关着不算问题）
     let (paths2, _m2) =
-        query_all().map_err(|e| format!("恢复物理屏后复查拓扑失败（错误码 {e}）"))?;
+        query_all().map_err(|e| tr_fmt!("恢复物理屏后复查拓扑失败（错误码 {e}）", "Rechecking the topology after restoring the physical displays failed (error code {e})"))?;
     let p2 = physical_paths(&paths2);
     let mut keys: Vec<(u32, u32, i32)> = Vec::new();
     for (idx, _n, _a) in &p2 {
@@ -628,11 +618,9 @@ fn restore_physicals_surgery() -> Result<PhysicalOutcome, String> {
             targets_off += 1;
         }
     }
-    out.notes.push(format!(
-        "复查：物理目标 {} 个，仍全部关着的 {} 个",
+    out.notes.push(tr_fmt!("复查：物理目标 {} 个，仍全部关着的 {} 个", "Recheck: {} physical target(s), {} still fully off",
         keys.len(),
-        targets_off
-    ));
+        targets_off));
     out.applied = targets_off == 0;
     Ok(out)
 }
