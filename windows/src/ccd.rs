@@ -368,7 +368,7 @@ pub fn disable_physicals() -> Result<PhysicalOutcome, String> {
         let (friendly, devpath) = target_name(p);
         is_vdd_target(&friendly, &devpath) && p.flags & PATH_ACTIVE != 0
     });
-    out.notes.push(tr_fmt!("复查：仍开着的物理屏 {still_on} 块，VDD 激活={}", "Recheck: {} physical display(s) still on, VDD active={}",
+    out.notes.push(tr_fmt!("复查：仍开着的物理屏 {still_on} 块，VDD 激活={}", "Recheck: {still_on} physical display(s) still on, VDD active={}",
         if vdd_still { tr("是", "yes") } else { tr("否", "no") }));
     out.applied = still_on == 0 && vdd_still;
     Ok(out)

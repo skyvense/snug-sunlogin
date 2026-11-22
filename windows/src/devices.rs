@@ -2,7 +2,6 @@
 //! 枚举走 PowerShell 的 Get-PnpDevice 并拼成竖线分隔的纯文本——不依赖 JSON 解析，
 //! 也不解析 pnputil 的本地化文本输出（只用它的退出码）。
 
-use crate::lang::tr;
 use crate::tr_fmt;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
