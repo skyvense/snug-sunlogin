@@ -4,6 +4,7 @@
 // AppController 在启动和每次改语言时调 apply 把结果同步到这里和 AppState.english：
 // SwiftUI 界面读 AppState.english（走 state.tr）保证改语言立刻重画；
 // 菜单、状态文案等非界面代码读 Lang.tr（同一份结果的静态镜像）
+import Foundation
 import SnugCore
 
 enum Lang {
