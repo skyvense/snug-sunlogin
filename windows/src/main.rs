@@ -1566,6 +1566,32 @@ fn relayout(hwnd: HWND) {
 
 // MARK: 窗口过程
 
+/// 主窗口背景构图（整幅页底 + 手机屏卡片白），WM_ERASEBKGND 与 WM_PRINTCLIENT 共用：
+/// 主题子控件向父窗口要背景时，给定的 DC 已按控件位置裁好，照整幅构图填即可。
+fn paint_main_background(hwnd: HWND, hdc: HDC) {
+    let cp = MAIN.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|s| s.card_phone)
+            .unwrap_or((0, 0, 0, 0))
+    });
+    unsafe {
+        let mut rc = windows::Win32::Foundation::RECT::default();
+        let _ = GetClientRect(hwnd, &mut rc);
+        FillRect(hdc, &rc, bg_brush());
+        let (x, y, w, h) = cp;
+        if w > 0 && h > 0 {
+            let card = windows::Win32::Foundation::RECT {
+                left: x,
+                top: y,
+                right: x + w,
+                bottom: y + h,
+            };
+            FillRect(hdc, &card, card_brush());
+        }
+    }
+}
+
 unsafe extern "system" fn main_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -1925,33 +1951,17 @@ unsafe extern "system" fn main_wnd_proc(
             LRESULT(0)
         }
         WM_ERASEBKGND => {
-            // 主题控件（单选钮）会让父窗口代画它身下的背景（DrawThemeParentBackground
-            // 走 WM_ERASEBKGND）：默认擦除只用窗口类底刷（页底灰），卡片上的单选钮
-            // 因此透出灰带（2026-11-22 实测，CTLCOLORBTN 改白也没用，病根在这里）。
-            // 按 WM_PAINT 的构图擦：整幅页底灰 + 卡片矩形白，圆角由随后的 PAINT 描边盖住。
-            let cp = MAIN.with(|c| {
-                c.borrow()
-                    .as_ref()
-                    .map(|s| s.card_phone)
-                    .unwrap_or((0, 0, 0, 0))
-            });
-            unsafe {
-                let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
-                let mut rc = windows::Win32::Foundation::RECT::default();
-                let _ = GetClientRect(hwnd, &mut rc);
-                FillRect(hdc, &rc, bg_brush());
-                let (x, y, w, h) = cp;
-                if w > 0 && h > 0 {
-                    let card = windows::Win32::Foundation::RECT {
-                        left: x,
-                        top: y,
-                        right: x + w,
-                        bottom: y + h,
-                    };
-                    FillRect(hdc, &card, card_brush());
-                }
-            }
+            paint_main_background(hwnd, HDC(wparam.0 as *mut core::ffi::c_void));
             LRESULT(1)
+        }
+        WM_PRINTCLIENT => {
+            // 主题子控件（单选钮）向父窗口要身下的背景走的是 WM_PRINTCLIENT
+            // （DrawThemeParentBackground），不是 WM_ERASEBKGND：父窗口不处理时，
+            // 控件拿到的是系统按钮面灰 #F0F0F0——这才是单选钮灰带的真身
+            // （2026-11-22 实测：CTLCOLORBTN 改白、ERASEBKGND 按卡片构图擦、启动后
+            // RedrawWindow 全体重擦，三招都不动它，最后定位到这里）。
+            paint_main_background(hwnd, HDC(wparam.0 as *mut core::ffi::c_void));
+            LRESULT(0)
         }
         WM_PAINT => {
             // 现代主题的底：整幅刷浅灰，再把内容卡片画成白底圆角描边
@@ -1984,7 +1994,6 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
-        WM_ERASEBKGND => LRESULT(1), // 背景由 WM_PAINT 整幅画，不先擦（免得露灰）
         WM_DRAWITEM => {
             let dis = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
             draw_button(dis);
