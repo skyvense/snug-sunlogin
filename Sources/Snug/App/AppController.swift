@@ -49,6 +49,8 @@ final class AppController: Sendable {
                          defaultZoom: store.config.zoomSteps, fit: ScreenFit(phone: phone.screen))
         catalog = AppCatalog(apps: apps, windows: windows)
         state.config = store.config
+        Lang.apply(store.config.language)
+        state.english = Lang.english
         state.phones = phones
         state.accessibilityTrusted = AX.isTrusted
         updater = Updater(state: state)

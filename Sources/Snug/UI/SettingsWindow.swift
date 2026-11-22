@@ -43,6 +43,17 @@ struct SettingsView: View {
                     SettingLabel("字号放大", detail: "终端、编辑器", symbol: "textformat.size", tint: .green)
                 }
                 .disabled(!state.config.phoneScreen)
+                LabeledContent {
+                    Picker("", selection: binding(\.config.language, intents.setLanguage)) {
+                        Text(state.tr("跟随系统", "Follow System")).tag(LanguagePref.system)
+                        Text("简体中文").tag(LanguagePref.zh)
+                        Text("English").tag(LanguagePref.en)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                } label: {
+                    SettingLabel(state.tr("界面语言", "Language"), detail: state.tr("默认跟随系统语言", "Follows the system language by default"), symbol: "globe", tint: .teal)
+                }
             }
             Section {
                 Toggle(isOn: binding(\.launchAtLogin, intents.setLaunchAtLogin)) {

@@ -54,6 +54,7 @@ enum Renderer {
 @MainActor
 final class RenderStub: AppIntents, PhoneIntents, Navigation {
     func setPhoneScreen(_ on: Bool) {}
+    func setLanguage(_ pref: LanguagePref) {}
     func setGestures(_ on: Bool) {}
     func setZoomSteps(_ steps: Int) {}
     func setLaunchAtLogin(_ on: Bool) {}

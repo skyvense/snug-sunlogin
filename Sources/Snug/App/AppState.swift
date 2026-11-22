@@ -15,6 +15,8 @@ enum ConnectionPhase: Equatable {
 @Observable
 final class AppState {
     var config = AppConfig()
+    /// 界面实际显示英文与否（由 config.language + 系统语言算出，AppController 维护；界面取词读它，见 Lang）
+    var english = false
     /// 机型库（启动时读一次）：设置和手机屏上选手机型号用
     var phones = PhoneCatalog.empty
     var connection = ConnectionPhase.idle
@@ -69,6 +71,7 @@ enum LoginItemIssue: Equatable {
 @MainActor
 protocol AppIntents: AnyObject, Sendable {
     func setPhoneScreen(_ on: Bool)
+    func setLanguage(_ pref: LanguagePref)
     func setGestures(_ on: Bool)
     func setZoomSteps(_ steps: Int)
     func setLaunchAtLogin(_ on: Bool)

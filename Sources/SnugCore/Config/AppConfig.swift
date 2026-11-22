@@ -1,6 +1,14 @@
 // 用户设置（config.json）。App 层的 AppController 是唯一写入者
 import Foundation
 
+/// 界面语言：跟随系统（默认）、强制简体中文、强制 English。存的是用户的选择，
+/// 实际显示哪种由 Lang 按「选择 + 系统语言」算（见 App 层的 Lang）
+public enum LanguagePref: String, Codable, Equatable, Sendable {
+    case system
+    case zh
+    case en
+}
+
 public struct AppConfig: Codable, Equatable, Sendable {
     /// 总开关：用手机远程时加一块手机屏
     public var phoneScreen = true
@@ -15,6 +23,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var phone = PhoneChoice.standard
     /// 是否已看过首次启动的欢迎页
     public var welcomed = false
+    /// 界面语言（默认跟随系统）
+    public var language = LanguagePref.system
     /// 从哪检查和下载更新。本 fork 只有 GitHub 一个源（上游的腾讯云国内源没有配置）
     public var updateSource = UpdateSource.github
     /// 上次运行的版本：和这次不一样说明刚换了版本，启动时弹「关于 Snug」
@@ -25,7 +35,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case phoneScreen, gestures, screenshot, zoomSteps, phone, welcomed, updateSource, lastVersion
+        case phoneScreen, gestures, screenshot, zoomSteps, phone, welcomed, updateSource, lastVersion, language
     }
 
     // 每一项都有默认值：以后加字段、或者手改漏了某项，都不会让整份配置被判为损坏
@@ -39,6 +49,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         // 手改坏了的（缺字段、不是竖握、不是正数）用默认值，不连累别的设置
         phone = (try? c.decodeIfPresent(PhoneChoice.self, forKey: .phone)).flatMap { $0.screen.isValid ? $0 : nil } ?? d.phone
         welcomed = try c.decodeIfPresent(Bool.self, forKey: .welcomed) ?? d.welcomed
+        // 不认识的语言值（更新的版本加的、降级回来）用默认值
+        language = (try? c.decodeIfPresent(LanguagePref.self, forKey: .language)) ?? d.language
         // 不认识的更新源（更新的版本加的、降级回来）用默认值
         updateSource = (try? c.decodeIfPresent(UpdateSource.self, forKey: .updateSource)) ?? d.updateSource
         lastVersion = try? c.decodeIfPresent(Version.self, forKey: .lastVersion)

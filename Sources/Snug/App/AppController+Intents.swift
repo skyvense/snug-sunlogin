@@ -6,6 +6,8 @@ import SnugCore
 extension AppController: AppIntents {
     func setPhoneScreen(_ on: Bool) { changeConfig("手机屏 → \(on ? "开" : "关")") { $0.phoneScreen = on } }
 
+    func setLanguage(_ pref: LanguagePref) { changeConfig("界面语言 → \(pref.rawValue)") { $0.language = pref } }
+
     func setGestures(_ on: Bool) {
         guard changeConfig("手机手势 → \(on ? "开" : "关")", { $0.gestures = on }) else { return }
         syncGestures()
@@ -126,6 +128,9 @@ extension AppController: AppIntents {
         Log.info("设置：\(what)")
         state.update(\.configSaveFailed, false)
         state.update(\.config, store.config)
+        // 语言可能跟着变了：静态镜像和界面观察的是同一份结果，一起同步
+        Lang.apply(store.config.language)
+        state.update(\.english, Lang.english)
         return true
     }
 }
