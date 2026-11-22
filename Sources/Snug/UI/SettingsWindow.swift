@@ -233,20 +233,20 @@ private struct CustomScreenForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(state.tr("自定义分辨率", "Custom Resolution")).font(.headline)
+            Text(Lang.tr("自定义分辨率", "Custom Resolution")).font(.headline)
             HStack(spacing: 8) {
-                TextField(state.tr("宽", "Width"), value: $width, format: .number.grouping(.never))
+                TextField(Lang.tr("宽", "Width"), value: $width, format: .number.grouping(.never))
                 Text("×").foregroundStyle(.secondary)
-                TextField(state.tr("高", "Height"), value: $height, format: .number.grouping(.never))
+                TextField(Lang.tr("高", "Height"), value: $height, format: .number.grouping(.never))
             }
             .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.center)
             Text(PhoneScreen.customHint).font(.callout).foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button(state.tr("取消", "Cancel")) { done(nil) }
+                Button(Lang.tr("取消", "Cancel")) { done(nil) }
                     .keyboardShortcut(.cancelAction)
-                Button(state.tr("使用", "Use")) { done(screen) }
+                Button(Lang.tr("使用", "Use")) { done(screen) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(screen == nil)
             }
@@ -269,7 +269,7 @@ private struct ZoomSlider: View {
         let range = AppConfig.zoomStepsRange
         Slider(value: Binding(get: { Double(steps) }, set: { steps = Int($0.rounded()) }),
                in: Double(range.lowerBound)...Double(range.upperBound), step: 1) {
-            Text(state.tr("字号放大", "Text Zoom"))
+            Text(Lang.tr("字号放大", "Text Zoom"))
         } minimumValueLabel: {
             Image(systemName: "textformat.size.smaller")
         } maximumValueLabel: {
@@ -277,7 +277,7 @@ private struct ZoomSlider: View {
         }
         .labelsHidden()
         .frame(width: 160)
-        .accessibilityValue(steps == 0 ? state.tr("不放大", "Off") : "+\(steps)")
+        .accessibilityValue(steps == 0 ? Lang.tr("不放大", "Off") : "+\(steps)")
     }
 }
 
