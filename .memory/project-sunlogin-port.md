@@ -212,4 +212,6 @@ metadata:
 - 机主要求：Mac 版也加多语言，跟 Windows 一样，并加系统自适应 + 手工切换。实现与 Windows 同构：config.json 增 language（system/zh/en，默认 system，容错解码）；Lang 取词（选 zh/en 用它，system 时看 Locale.preferredLanguages 首项是否 zh）；AppState.english 可观察镜像，SwiftUI 界面走 state.tr 改语言即重画，非界面（菜单/状态文案/更新失败原因）走 Lang.tr 静态镜像，AppController 在启动与 changeConfig 后统一 apply。
 - 切换入口：设置窗口通用页新增「界面语言」行（Picker：跟随系统/简体中文/English，后两者用各自语言写）。手机屏面板的文案是建时定的：PhoneScreenWindows.follow 跟踪 state.english，update 里语言变了就 tearDown+build 重建（与换屏同一条路）；小横条无障碍名也随语言。
 - 覆盖：设置页、菜单栏、StatusText 全部状态/提示、PermissionName（权限名按语言取系统叫法，PermissionFlow 传 en/zh-Hans）、欢迎页、关于页（含致谢 usage）、更新界面与 UpdateProblem、手机屏（首页/卡片/搜索/型号页/小部件/裁剪/截图浮层）。不译的：日志与 changeConfig 的 what 描述（Mac 无界面日志窗，属内部诊断）、AppBundle 错误细节（只进日志）、「Snug 手机屏」虚拟屏名（屏的真名，感知可能按名匹配，作数据）、App 匹配类字符串（NewWindowMenu/ControllerKind 等，同 Windows apps.rs 的处理）。
-- CI：run 44998440895 绿（swift build + 全部测试）。实测待做：Mac mini 在线但向日葵连入要访问密码（本实例未存），等机主提供后装分支构建截图验中英两态。
+- CI：run 44998440895 绿（swift build + 全部测试）。
+- 界面验证走编译机渲染（机主问起才想起 App 自带 --render-*）：Renderer 增 SNUG_RENDER_LANG 环境变量选语言（AppState.english 默认取 Lang 当前值，样例状态自动跟随）；ci.yml 增手动触发 job「渲染界面截图（中英）」，macos-26 上构建后对 6 个界面各渲中英两套、传 artifact。run 45005498416 两 job 全绿，下载 112 张 PNG 逐张看过关键图：英文设置页（含 Language 行显示 Follow System）、英文手机屏列表（Running/All、1 window/2 windows 单复数、Minimized）、英文欢迎页、中文设置页（界面语言行显示跟随系统）均正确；图里残留的中文是样例数据（App 名、窗口标题）和虚拟屏真名「Snug 手机屏」，非界面文案。注意：新工作流文件不在默认分支时 gh workflow run 报 404（dispatch 只能用默认分支上已有的工作流名），所以渲染 job 挂在既有 ci.yml 上、用 workflow_dispatch 触发、--ref 指分支即可（用的是分支上的 ci.yml 内容）。
+- 真机实测：机主决定自己在 Mac mini 上测（分支构建 scripts/snug install），结论待他回话；合并发版等他点头。
