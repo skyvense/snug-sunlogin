@@ -1915,6 +1915,35 @@ unsafe extern "system" fn main_wnd_proc(
             }
             LRESULT(0)
         }
+        WM_ERASEBKGND => {
+            // 主题控件（单选钮）会让父窗口代画它身下的背景（DrawThemeParentBackground
+            // 走 WM_ERASEBKGND）：默认擦除只用窗口类底刷（页底灰），卡片上的单选钮
+            // 因此透出灰带（2026-11-22 实测，CTLCOLORBTN 改白也没用，病根在这里）。
+            // 按 WM_PAINT 的构图擦：整幅页底灰 + 卡片矩形白，圆角由随后的 PAINT 描边盖住。
+            let cp = MAIN.with(|c| {
+                c.borrow()
+                    .as_ref()
+                    .map(|s| s.card_phone)
+                    .unwrap_or((0, 0, 0, 0))
+            });
+            unsafe {
+                let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
+                let mut rc = windows::Win32::Foundation::RECT::default();
+                let _ = GetClientRect(hwnd, &mut rc);
+                FillRect(hdc, &rc, bg_brush());
+                let (x, y, w, h) = cp;
+                if w > 0 && h > 0 {
+                    let card = windows::Win32::Foundation::RECT {
+                        left: x,
+                        top: y,
+                        right: x + w,
+                        bottom: y + h,
+                    };
+                    FillRect(hdc, &card, card_brush());
+                }
+            }
+            LRESULT(1)
+        }
         WM_PAINT => {
             // 现代主题的底：整幅刷浅灰，再把内容卡片画成白底圆角描边
             let cp = MAIN.with(|c| {
