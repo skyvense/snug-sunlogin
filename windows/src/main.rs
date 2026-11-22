@@ -1575,31 +1575,45 @@ fn restore_session_windows() {
 
 /// 把 state 里的四套字体按创建时的分工发给各控件（mk_control 创建时发过
 /// 一次；DPI 变化重建字体后要再发一遍，否则控件还抱着旧磅数）。
-fn apply_fonts(s: &MainState) {
-    let set = |hwnd: HWND, font: HFONT| unsafe {
-        SendMessageW(
-            hwnd,
-            WM_SETFONT,
-            Some(WPARAM(font.0 as usize)),
-            Some(LPARAM(1)),
-        );
-    };
-    set(s.status, s.status_font);
-    set(s.lbl_phone, s.grp_font);
-    set(s.log_edit, s.log_font);
-    for h in [
-        s.detail,
-        s.list,
-        s.btn_create,
-        s.btn_remove,
-        s.phone_hint,
-        s.model_label,
-        s.combo_model,
-        s.radio_auto,
-        s.radio_manual,
-        s.btn_refresh,
-    ] {
-        set(h, s.ui_font);
+/// 先快照句柄再逐个发：WM_SETFONT 会让控件同步重绘、父窗口随即收到
+/// WM_CTLCOLORSTATIC，那边要借 MAIN——攥着借用发消息会撞
+/// RefCell already mutably borrowed（2026-11-22 实测崩过一次）。
+fn apply_fonts() {
+    let pairs: Vec<(HWND, HFONT)> = MAIN.with(|c| {
+        let cell = c.borrow();
+        let Some(s) = cell.as_ref() else {
+            return Vec::new();
+        };
+        let mut v = vec![
+            (s.status, s.status_font),
+            (s.lbl_phone, s.grp_font),
+            (s.log_edit, s.log_font),
+        ];
+        for h in [
+            s.detail,
+            s.list,
+            s.btn_create,
+            s.btn_remove,
+            s.phone_hint,
+            s.model_label,
+            s.combo_model,
+            s.radio_auto,
+            s.radio_manual,
+            s.btn_refresh,
+        ] {
+            v.push((h, s.ui_font));
+        }
+        v
+    });
+    for (hwnd, font) in pairs {
+        unsafe {
+            SendMessageW(
+                hwnd,
+                WM_SETFONT,
+                Some(WPARAM(font.0 as usize)),
+                Some(LPARAM(1)),
+            );
+        }
     }
 }
 
@@ -2138,6 +2152,9 @@ unsafe extern "system" fn main_wnd_proc(
             // 主窗口被挪到 175% 的虚拟屏正是这条路（2026-11-22 机主实测）。
             let new_dpi = (wparam.0 & 0xffff) as i32;
             let mut old_fonts: Vec<HFONT> = Vec::new();
+            let mut list_hwnd = HWND::default();
+            // 借用只做换字体这点事，发消息（apply_fonts）和改列宽都放到
+            // 借用释放之后——理由见 apply_fonts 的注释
             MAIN.with(|c| {
                 if let Some(s) = c.borrow_mut().as_mut() {
                     s.dpi = new_dpi;
@@ -2146,10 +2163,11 @@ unsafe extern "system" fn main_wnd_proc(
                     s.status_font = make_font("Microsoft YaHei UI", 12, 600, new_dpi);
                     s.grp_font = make_font("Microsoft YaHei UI", 11, 600, new_dpi);
                     s.log_font = make_font("Consolas", 10, 400, new_dpi);
-                    apply_fonts(s);
-                    init_list_columns(s.list, new_dpi);
+                    list_hwnd = s.list;
                 }
             });
+            apply_fonts();
+            init_list_columns(list_hwnd, new_dpi);
             let rect = lparam.0 as *const windows::Win32::Foundation::RECT;
             unsafe {
                 for f in old_fonts {
