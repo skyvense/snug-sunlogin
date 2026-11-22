@@ -1983,6 +1983,9 @@ unsafe extern "system" fn main_wnd_proc(
                 restore_physicals_if_off("启动自检");
             }
             session::spawn(hwnd.0 as usize);
+            // 资源库的「全部」数据先在后台扫好缓存，用户点开时直接用，
+            // 不用对着消失的悬浮图标干等（全量扫描一两秒起步）
+            launcher::refresh_apps_cache_async();
             // 启动后静默查一次新版：没有就不打扰，有才弹窗问
             update::spawn_check(hwnd.0 as usize, false);
             // 配置向导：带 --guide 启动直接打开；否则每次启动都检测一遍驱动，

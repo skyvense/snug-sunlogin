@@ -10,6 +10,7 @@ use crate::display::wide;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -249,17 +250,30 @@ pub fn toggle(rect: RECT) {
     }
 }
 
-pub fn open(rect: RECT) -> Result<(), String> {
-    register_classes()?;
-    hide_home();
-    let running = apps::running_windows();
+/// 「全部」App 数据的缓存：开始菜单/AppsFolder 扫描 + 每个 .lnk 的目标
+/// 解析 + UserAssist 频率，一整套一两秒起步。以前 open() 同步跑完才建
+/// 窗口，悬浮图标点完先消失、列表迟迟不来（机主实测反馈）。现在首次
+/// 全量扫一次填缓存，之后打开直接吃缓存；过期由后台线程静默刷新，
+/// 本次打开用旧数据、下次就是新的（App 装卸不是分秒级的事，够用）。
+#[derive(Clone)]
+struct AppsData {
+    installed: Vec<InstalledApp>,
+    recent: Vec<InstalledApp>,
+    usage: HashMap<String, apps::UsageInfo>,
+    eff: HashMap<String, apps::UsageInfo>,
+    at: Instant,
+}
+
+static APPS_CACHE: Mutex<Option<AppsData>> = Mutex::new(None);
+static APPS_REFRESHING: AtomicBool = AtomicBool::new(false);
+
+fn scan_apps_data() -> AppsData {
     let installed = apps::installed_apps();
     let recent = apps::recent_apps(&installed);
     let usage = apps::usage_map();
     let eff = apps::effective_usage(&usage, &installed);
     crate::log::write(&format!(
-        "资源库：运行中 {} 个窗口，全部 {} 个 App，最近使用 {} 个，使用频率 {} 条键",
-        running.len(),
+        "资源库数据扫描完成：全部 {} 个 App，最近使用 {} 个，使用频率 {} 条键",
         installed.len(),
         recent.len(),
         usage.len()
@@ -280,6 +294,58 @@ pub fn open(rect: RECT) -> Result<(), String> {
             if apps::is_common_app(a) { "（常用）" } else { "" }
         ));
     }
+    AppsData {
+        installed,
+        recent,
+        usage,
+        eff,
+        at: Instant::now(),
+    }
+}
+
+/// 取「全部」数据：有缓存直接克隆返回（毫秒级），没有才同步全量扫。
+fn apps_data() -> (AppsData, bool) {
+    if let Some(d) = APPS_CACHE.lock().unwrap().as_ref() {
+        return (d.clone(), true);
+    }
+    let d = scan_apps_data();
+    *APPS_CACHE.lock().unwrap() = Some(d.clone());
+    (d, false)
+}
+
+/// 后台刷新缓存（已在刷则跳过）。主窗口启动和每次打开时顺手调，
+/// 让用户点开时缓存总是热的、新的。
+pub fn refresh_apps_cache_async() {
+    if APPS_REFRESHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let d = scan_apps_data();
+        *APPS_CACHE.lock().unwrap() = Some(d);
+        APPS_REFRESHING.store(false, Ordering::SeqCst);
+    });
+}
+
+pub fn open(rect: RECT) -> Result<(), String> {
+    register_classes()?;
+    let t0 = Instant::now();
+    // 运行中窗口必须现扫（变得快、本身也快）；「全部」吃缓存
+    let running = apps::running_windows();
+    let (data, from_cache) = apps_data();
+    if from_cache && data.at.elapsed() > Duration::from_secs(120) {
+        refresh_apps_cache_async();
+    }
+    let installed = data.installed;
+    let recent = data.recent;
+    let usage = data.usage;
+    let eff = data.eff;
+    crate::log::write(&format!(
+        "资源库：运行中 {} 个窗口，全部 {} 个 App（数据{}，备数据 {} ms）",
+        running.len(),
+        installed.len(),
+        if from_cache { "来自缓存" } else { "全量扫描" },
+        t0.elapsed().as_millis()
+    ));
     for w in &running {
         crate::log::write(&format!(
             "  运行中：{}（pid {}）— {}",
@@ -347,6 +413,9 @@ pub fn open(rect: RECT) -> Result<(), String> {
                 );
                 let _ = InvalidateRect(Some(hwnd), None, true);
             }
+            // 列表窗口已经出来了，这时才收悬浮图标——以前一点击就先藏
+            // 图标、再慢慢备数据，中间那段空白最难受
+            hide_home();
             raise(hwnd);
             Ok(())
         }
