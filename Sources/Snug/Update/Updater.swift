@@ -48,12 +48,12 @@ enum UpdateProblem: Error, Equatable {
 
     var text: String {
         switch self {
-        case .unreachable(let source): "无法从\(source.title)获取更新"
-        case .corrupt: "下载内容校验失败"
-        case .tooOld: "新版本需手动下载"
-        case .cannotReplace: "无法替换当前位置的 Snug"
-        case .signature: "新版本签名不符"
-        case .failed: "更新失败"
+        case .unreachable(let source): Lang.tr("无法从\(source.title)获取更新", "Couldn't fetch updates from \(source.title)")
+        case .corrupt: Lang.tr("下载内容校验失败", "The download failed verification")
+        case .tooOld: Lang.tr("新版本需手动下载", "The new version needs a manual download")
+        case .cannotReplace: Lang.tr("无法替换当前位置的 Snug", "Can't replace Snug at its current location")
+        case .signature: Lang.tr("新版本签名不符", "The new version's signature doesn't match")
+        case .failed: Lang.tr("更新失败", "Update failed")
         }
     }
 
