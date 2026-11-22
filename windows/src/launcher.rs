@@ -180,6 +180,24 @@ pub fn is_open() -> bool {
     LAUNCHER.with(|c| c.borrow().is_some())
 }
 
+/// 把列表窗口提到最前（机主要求：主控刚连入时资源库要置顶，盖住虚拟屏
+/// 上已有的窗口）。只做一次性提位，不挂 TOPMOST 长期置顶——点选 App 后
+/// 资源库会关，长期置顶反而挡住被打开的窗口。
+fn raise(hwnd: HWND) {
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE,
+        );
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
 /// 把资源库挪到给定的虚拟屏矩形上：列表开着就移列表窗口，没开就移悬浮
 /// App 按钮（show_home 对已存在的按钮只移位）。关物理屏会把虚拟屏源位置
 /// 移到 (0,0)，窗口不一定跟着走，关屏后钉一次位置。返回是否真的移了。
@@ -207,6 +225,7 @@ pub fn move_to(rect: RECT) -> bool {
                 // 留下——页签和关闭钮就是这样消失的（2026-11-22 实测）
                 let _ = InvalidateRect(Some(hwnd), None, true);
             }
+            raise(hwnd);
             return true;
         }
     }
@@ -328,6 +347,7 @@ pub fn open(rect: RECT) -> Result<(), String> {
                 );
                 let _ = InvalidateRect(Some(hwnd), None, true);
             }
+            raise(hwnd);
             Ok(())
         }
         Err(e) => {
