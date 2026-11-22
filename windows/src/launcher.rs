@@ -180,6 +180,39 @@ pub fn is_open() -> bool {
     LAUNCHER.with(|c| c.borrow().is_some())
 }
 
+/// 把资源库挪到给定的虚拟屏矩形上：列表开着就移列表窗口，没开就移悬浮
+/// App 按钮（show_home 对已存在的按钮只移位）。关物理屏会把虚拟屏源位置
+/// 移到 (0,0)，窗口不一定跟着走，关屏后钉一次位置。返回是否真的移了。
+pub fn move_to(rect: RECT) -> bool {
+    let hwnd = LAUNCHER.with(|c| c.borrow().as_ref().map(|s| s.hwnd));
+    if let Some(hwnd) = hwnd {
+        if !hwnd.is_invalid() {
+            LAUNCHER.with(|c| {
+                if let Some(s) = c.borrow_mut().as_mut() {
+                    s.rect = rect;
+                }
+            });
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    SWP_NOZORDER,
+                );
+            }
+            return true;
+        }
+    }
+    if HOME.with(|c| c.borrow().is_some()) {
+        show_home(rect);
+        return true;
+    }
+    false
+}
+
 // MARK: 打开 / 关闭
 
 /// 在 rect 这块屏上打开资源库（已开则关掉，开关式）。

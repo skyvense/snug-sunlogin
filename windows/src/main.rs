@@ -1301,6 +1301,20 @@ fn turn_off_physicals(reason: &str) {
                     }
                 });
                 ui_log("物理屏已关闭，现在只输出虚拟屏（断开后自动恢复）");
+                // 关屏把虚拟屏源位置移到了 (0,0)，资源库窗口不一定跟着走
+                // （机主 2026-11-22 实测：连入后资源库没出现在虚拟屏上）：
+                // 按当前枚举到的虚拟屏矩形把它钉回去，没开列表时只移悬浮按钮
+                if let Some(d) = display::list().iter().find(|d| d.is_virtual()) {
+                    let rect = windows::Win32::Foundation::RECT {
+                        left: d.x,
+                        top: d.y,
+                        right: d.x + d.width as i32,
+                        bottom: d.y + d.height as i32,
+                    };
+                    if launcher::move_to(rect) {
+                        ui_log("资源库已按虚拟屏新位置重新对齐");
+                    }
+                }
             } else if out.changed == 0 {
                 ui_log("没有可关的物理屏（本来就只剩虚拟屏？），保持现状");
             } else {
