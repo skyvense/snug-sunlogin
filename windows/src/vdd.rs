@@ -23,6 +23,10 @@ pub struct VddState {
     /// 断开/退出时据此恢复；万一程序异常退出，下次启动看到它先恢复再说，
     /// 保证物理屏不会被永久留在关闭状态。
     pub physical_off: bool,
+    /// 当前这块虚拟屏算「自动建的」——断开时自动拆的就是它。
+    /// 和 physical_off 一样落盘：程序中途重启（更新、崩溃、手动重开）后
+    /// 所有权不能丢，否则断开时不敢拆、屏会留下。
+    pub screen_auto_owned: bool,
 }
 
 // MARK: 状态文件（%LOCALAPPDATA%\SnugWindows\vdd-state.txt，简单的 k=v 行）
@@ -42,6 +46,7 @@ pub fn load_state() -> VddState {
                     "created_file" => state.created_file = v.trim() == "1",
                     "scale_rel_before" => state.scale_rel_before = v.trim().parse().ok(),
                     "physical_off" => state.physical_off = v.trim() == "1",
+                    "screen_auto_owned" => state.screen_auto_owned = v.trim() == "1",
                     _ => {}
                 }
             }
@@ -61,6 +66,7 @@ pub fn save_state(state: &VddState) {
         text += &format!("scale_rel_before={rel}\n");
     }
     text += &format!("physical_off={}\n", if state.physical_off { 1 } else { 0 });
+    text += &format!("screen_auto_owned={}\n", if state.screen_auto_owned { 1 } else { 0 });
     let _ = std::fs::create_dir_all(crate::log::dir());
     let _ = std::fs::write(state_path(), text);
 }
