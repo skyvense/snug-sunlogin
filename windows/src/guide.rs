@@ -504,6 +504,7 @@ fn on_action(hwnd: HWND) {
             append_line(tr("\n正在创建手机屏并验证（最长等 20 秒）…", "\nCreating the phone screen and verifying (waiting up to 20 s)…"));
             set_action(tr("正在验证…", "Verifying…"), false);
             crate::create_phone_screen();
+            crate::adopt_created_screen();
             start_verify(hwnd.0 as usize);
         }
         Step::Remove => {
@@ -527,6 +528,7 @@ fn on_action(hwnd: HWND) {
             append_line(tr("\n正在创建手机屏并打开测试画面（最长等 20 秒）…", "\nCreating the phone screen and opening the test pattern (waiting up to 20 s)…"));
             set_action(tr("正在验证…", "Verifying…"), false);
             crate::create_phone_screen();
+            crate::adopt_created_screen();
             start_verify(hwnd.0 as usize);
         }
         Step::Check | Step::Install => {

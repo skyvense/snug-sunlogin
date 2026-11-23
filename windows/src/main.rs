@@ -1181,6 +1181,24 @@ fn set_screen_owner(auto: bool) {
             s.screen_auto_owned = auto;
         }
     });
+    // 落盘（vdd-state 的 screen_auto_owned）：程序中途重启后所有权不能丢，
+    // 否则断开时判不出这块屏该不该拆。值没变就不写，省掉无谓的磁盘动作
+    let mut st = vdd::load_state();
+    if st.screen_auto_owned != auto {
+        st.screen_auto_owned = auto;
+        vdd::save_state(&st);
+    }
+}
+
+/// 向导替主程序建的屏（第 3 步验证建屏、第 5 步测试画面）：按当前模式登记所有权。
+/// 自动模式下它和会话自动建的屏同命，断开时一并拆掉；手动模式归用户自己管。
+/// 漏登记的后果（用户报告）：首装向导最后留下的测试屏不算「自动建的」，
+/// 连入时又见屏已在、不再走自动建屏那一步，首次远控断开就不会删它。
+pub(crate) fn adopt_created_screen() {
+    let auto = MAIN.with(|c| {
+        c.borrow().as_ref().map(|s| s.auto_create).unwrap_or(false)
+    });
+    set_screen_owner(auto);
 }
 
 /// 右上角语言切换：存设置后整窗换文案（静态控件、标题、列表列、型号名、
@@ -2078,7 +2096,7 @@ unsafe extern "system" fn main_wnd_proc(
                     only_virtual: saved.only_virtual,
                     physical_off: vdd::load_state().physical_off,
                     adv_menu: HMENU::default(),
-                    screen_auto_owned: false,
+                    screen_auto_owned: vdd::load_state().screen_auto_owned,
                     phone_hint,
                     log_edit,
                     log_text: String::new(),
