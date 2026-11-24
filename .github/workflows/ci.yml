@@ -48,3 +48,21 @@ jobs:
           name: ui-renders
           path: renders/
           if-no-files-found: error
+
+  diag-app:
+    name: 诊断包（Snug.app）
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: 打 App（编译机上没有开发者证书，ad-hoc 签名）
+        run: ./scripts/snug app
+      - name: 压缩（ditto 保住 App 包结构与签名）
+        run: ditto -c -k --keepParent build/Snug.app Snug-diag.zip
+      - name: 上传诊断包
+        uses: actions/upload-artifact@v4
+        with:
+          name: snug-diag-app
+          path: Snug-diag.zip
+          if-no-files-found: error
