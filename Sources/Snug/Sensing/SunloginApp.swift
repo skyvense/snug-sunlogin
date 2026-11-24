@@ -23,9 +23,15 @@ enum SunloginApp {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return false
         }
-        return list.contains {
-            ($0[kCGWindowOwnerName as String] as? String) == Sunlogin.overlayWindowOwner
-                && (($0[kCGWindowLayer as String] as? Int) ?? 0) >= Sunlogin.overlayWindowMinimumLayer
+        return list.contains { w in
+            guard (w[kCGWindowOwnerName as String] as? String) == Sunlogin.overlayWindowOwner
+                && ((w[kCGWindowLayer as String] as? Int) ?? 0) >= Sunlogin.overlayWindowMinimumLayer
+            else { return false }
+            // 0x0 的窗口什么都不显示：2026-11-24 问题机实锤，向日葵没被控时也有一个 layer=1001 的
+            // 0x0 占位窗口常驻在屏，只认图层会把「没人连」误判成在场（退出也永远判不下来）；要求有真实面积
+            guard let b = w[kCGWindowBounds as String] as? [String: Any],
+                  let width = b["Width"] as? Double, let height = b["Height"] as? Double else { return false }
+            return width > 0 && height > 0
         }
     }
 

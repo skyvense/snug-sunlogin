@@ -24,7 +24,8 @@ public enum Sunlogin {
     /// 放覆盖窗口的是主程序 AweSun：被控时它在屏上放一个图层 1001 的悬浮窗
     /// （2026-11-18 发现报告的窗口清单）。主程序自己的普通窗口在图层 0，
     /// 所以覆盖判定还要看图层，见 overlayWindowMinimumLayer 与 SunloginApp.overlayVisible。
-    /// 待核对：未被控时这个悬浮窗是否也在屏（基线报告），在的话这一路信号会误报。
+    /// 已核对（2026-11-24 问题机诊断日志）：未被控时也有一个图层 1001 的 0x0 占位窗口常驻在屏，
+    /// 只认图层会误报在场；判定还要求窗口有真实面积，见 SunloginApp.overlayVisible。
     public static let overlayWindowOwner = "AweSun"
     /// 覆盖窗口的最低图层：普通窗口为 0，实测被控悬浮窗为 1001，取 100 分隔
     public static let overlayWindowMinimumLayer = 100
