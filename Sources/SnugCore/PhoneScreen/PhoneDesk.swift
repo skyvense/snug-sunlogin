@@ -791,21 +791,21 @@ public final class PhoneDesk {
             return
         }
         // 先确认要放的窗口够得着，再动手机屏上现在那个：点到刚关掉的卡片，不能先把现在的拆了、两头落空
-        guard await step("reach 读窗口") { await reach(window) } != nil else { return }
+        guard await step("reach 读窗口", { await reach(window) }) != nil else { return }
         // 原来那个、或上次没放回去的那个放不回去（App 卡住）就不放：两个窗口会叠在手机屏上，还原记录也只记得住一个
-        if let p = placement, await !step("returnToOriginal 放回旧窗口") { await returnToOriginal(p) } {
+        if let p = placement, await !step("returnToOriginal 放回旧窗口", { await returnToOriginal(p) }) {
             Log.warn("\(p.window.label) 放不回去，先不换成 \(window.label)")
             state.notice = .windowUnresponsive(app: p.window.app)
             return
         }
-        if let stuck = await step("putBackLeftover 收拾留下的") { await putBackLeftover() } {
+        if let stuck = await step("putBackLeftover 收拾留下的", { await putBackLeftover() }) {
             Log.warn("\(stuck.label) 还放不回去，先不放 \(window.label)")
             state.notice = .windowUnresponsive(app: stuck.app)
             return
         }
         // 放回别的窗口可能动到它（上次没放回去的就是它），重新读
-        guard let look = await step("reach 再读窗口") { await reach(window) } else { return }
-        let known = Set(await step("shownWindows") { await windows.shownWindows(of: window.key.pid) }.map(\.key)).subtracting([window.key])
+        guard let look = await step("reach 再读窗口", { await reach(window) }) else { return }
+        let known = Set(await step("shownWindows", { await windows.shownWindows(of: window.key.pid) }).map(\.key)).subtracting([window.key])
         // 先记账再动手。全屏的窗口这时读到的是全屏的位置，崩溃后按它放回再恢复全屏也对。
         // 它是留下的账的窗口、原样回来了（手机屏上关掉又在手机上重开）：接着用那笔账，原位还是当初的，字号按带回来的算
         let owed = leftBehind.match(window, frame: look.frame)
@@ -822,11 +822,11 @@ public final class PhoneDesk {
             leftBehind.remove(at: owed)
             saveLeftBehind()
         }
-        if look.minimized { await step("setMinimized 还原") { await windows.setMinimized(window.key, false) } }
+        if look.minimized { await step("setMinimized 还原", { await windows.setMinimized(window.key, false) }) }
         if look.fullScreen {
-            await step("setFullScreen 退全屏") { await windows.setFullScreen(window.key, false) }
+            await step("setFullScreen 退全屏", { await windows.setFullScreen(window.key, false) })
             // 退出全屏后的位置才是它平时的位置：放回时回到这里再进全屏
-            if let windowed = await step("look 读退全屏后位置") { await windows.look(window.key) }?.frame {
+            if let windowed = await step("look 读退全屏后位置", { await windows.look(window.key) })?.frame {
                 next.record.original = originalFrame(windowed, offPhone: id)
                 write(next.record)
             }
@@ -847,7 +847,7 @@ public final class PhoneDesk {
             return
         }
         placement = next
-        await step("focus") { await windows.focus(window.key) }
+        await step("focus", { await windows.focus(window.key) })
         state.listVisible = false
         let was = look.fullScreen ? "（原来全屏）" : look.minimized ? "（原来最小化）" : ""
         let took = String(format: "%.1f", timeline.now - started)
