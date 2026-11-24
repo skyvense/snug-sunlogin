@@ -242,3 +242,5 @@ metadata:
 - 查代码发现原来的排除是漏的：AppList.excludedBundles 只含个人版 bundle id（com.oray.sunlogin.macclient），企业版客户端/贝锐企业控制端是别的 id 没被认出；且排除发生在 withWindows 补完窗口之后，扫描照花。
 - 定稿（分支 fix/mac-launcher-scan，CI 45354195860 绿）：诊断日志合并进修复（提交 535666a）；Sunlogin.isSunlogin 按 com.oray. 前缀认全家桶，AppList 排除与 WindowService.scannable 共用（提交 10bb84d）——远程扫描对向日葵直接跳过，当前空间窗口照常读。「检测 App 打开慢」同根：shownWindows 排队 49.2s、执行 0.0s，扫描离队后自愈。
 - 待机主确认：合并 main 发 v2.7.3。
+
+- 2026-11-24 16:17 机主定「先合并，暂不发版」：fix/mac-launcher-scan 快进合并进 main（2af6c99），feat/windows-app 已同步，main CI（45354810445）绿。VERSION 未动（仍 2.7.2）、未打 tag。发版 v2.7.3 待机主在问题机验证修复效果后再定。
