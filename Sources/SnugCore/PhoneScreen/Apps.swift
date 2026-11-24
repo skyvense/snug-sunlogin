@@ -80,8 +80,9 @@ public struct SearchKeys: Equatable, Sendable {
 }
 
 public enum AppList {
-    /// 不出现在资源库里的 App：向日葵 自己（把遥控器放到手机屏上没有意义，退了它远程就断了）
-    public static let excludedBundles: Set<String> = [Sunlogin.bundleID]
+    /// 不出现在资源库里的 App：向日葵 全家桶（把遥控器放到手机屏上没有意义，退了它远程就断了）；
+    /// 企业版、控制端的 bundle id 与主程序不同，按 Sunlogin.isSunlogin 的前缀规则认
+    public static func excluded(_ app: AppInfo) -> Bool { Sunlogin.isSunlogin(app.bundleID) }
 
     /// 不给退出的 App：访达。同 Mac，它的菜单、程序坞里都没有「退出」（实测 11-14 terminate 能退掉，桌面图标跟着没了）
     private static let unquittableBundles: Set<String> = ["com.apple.finder"]
@@ -93,7 +94,7 @@ public enum AppList {
     public static func ordered(_ apps: [RunningApp], frontToBack: [UInt32]) -> [RunningApp] {
         let rank = Dictionary(frontToBack.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         func position(_ window: WindowInfo) -> Int { rank[window.key.id] ?? Int.max }
-        return stableSorted(apps.filter { !excludedBundles.contains($0.app.bundleID) }.map { app in
+        return stableSorted(apps.filter { !excluded($0.app) }.map { app in
             var app = app
             app.windows = stableSorted(app.windows, by: position)
             return app
@@ -123,7 +124,7 @@ public enum AppList {
     public static func sorted(_ apps: [InstalledApp]) -> [InstalledApp] {
         var seen = Set<String>()
         return apps
-            .filter { !excludedBundles.contains($0.app.bundleID) && seen.insert($0.app.bundleID).inserted }
+            .filter { !excluded($0.app) && seen.insert($0.app.bundleID).inserted }
             .sorted { $0.keys.sortKey.localizedStandardCompare($1.keys.sortKey) == .orderedAscending }
     }
 

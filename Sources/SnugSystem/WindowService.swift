@@ -231,7 +231,15 @@ public final class WindowService: WindowControl {
     /// 后台再整个试一遍，找出这期间新开、又去了别的空间的窗口。扫描走自己的队列（rescan），
     /// 不排在挪窗口这类用户正等着的操作前面。
     /// 试到一半 App 卡住时结果不可缓存：不记、不覆盖旧的，不然它在别的空间里的窗口要从列表里消失一阵
+    /// 向日葵不扫：它答辅助功能调用最慢（实测一遍 31 秒，见 logScan 的记录），而且资源库
+    /// 本来就排除它——把遥控器自己的窗口放上手机屏没有意义。当前空间的窗口照常读（一次调用，不贵）
+    private func scannable(_ pid: pid_t) -> Bool {
+        guard let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier else { return true }
+        return !Sunlogin.isSunlogin(id)
+    }
+
     private func remoteWindows(pid: pid_t, now: TimeInterval) -> [AXUIElement] {
+        guard scannable(pid) else { return [] }
         guard let cached = remote.withLock({ $0[pid] }) else {
             rescan(pid: pid)
             return []
@@ -259,6 +267,7 @@ public final class WindowService: WindowControl {
         if let hit = visible.first(where: { AX.windowID($0) == window.id }) { return hit }
         if let cached = remote.withLock({ $0[window.pid] })?.windows,
            let hit = cached.first(where: { AX.windowID($0) == window.id }) { return hit }
+        guard scannable(window.pid) else { return nil }
         let scan = AX.remoteWindows(pid: window.pid, until: window.id)
         if scan.cacheable {
             remote.withLock { $0[window.pid] = (scan.windows, ProcessInfo.processInfo.systemUptime) }

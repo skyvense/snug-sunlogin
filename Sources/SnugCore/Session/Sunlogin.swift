@@ -7,6 +7,13 @@ public enum Sunlogin {
     /// 向日葵 Mac 主程序（AweSun.app）。bundle id 已由公开资料核对：
     /// 安装收据 com.oray.sunlogin.macclient、Homebrew cask `awesun` 均为此值
     public static let bundleID = "com.oray.sunlogin.macclient"
+    /// 向日葵全家桶的 bundle id 前缀（贝锐 Oray）：企业版、控制端等变体的 bundle id 与主程序不同，按前缀认，免得逐个收集
+    public static let bundleIDPrefix = "com.oray."
+
+    /// 是不是向日葵（主程序、企业版、控制端都算）
+    public static func isSunlogin(_ bundleID: String) -> Bool {
+        bundleID == Sunlogin.bundleID || bundleID.hasPrefix(bundleIDPrefix)
+    }
     /// 被远程时在本机推流、注入鼠标键盘的进程（按可执行文件名认）。
     ///
     /// 已实机核对（2026-11-18 发现报告，Mac mini M4 / 向日葵 16.8.1）：系统日志里的
