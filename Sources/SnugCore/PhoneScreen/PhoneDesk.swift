@@ -771,6 +771,15 @@ public final class PhoneDesk {
     // MARK: 放窗口
 
     /// zoom 为 false：放的是在问用户的窗口（对话框、挂着 sheet 的文档），不调字号，按键会被对话框挡下
+    /// 诊断：量一步花了多久，超过 1 秒记一行（查放置卡在哪一步用，平时不打）
+    private func step<T>(_ name: String, _ work: () async -> T) async -> T {
+        let start = timeline.now
+        let value = await work()
+        let spent = timeline.now - start
+        if spent >= 1 { Log.info("分步耗时：\(name) \(String(format: "%.1f", spent))s") }
+        return value
+    }
+
     private func place(_ window: WindowInfo, zoom: Bool = true) async {
         let started = timeline.now
         guard let id = readyDisplay(for: "放 \(window.label)") else {
@@ -782,21 +791,21 @@ public final class PhoneDesk {
             return
         }
         // 先确认要放的窗口够得着，再动手机屏上现在那个：点到刚关掉的卡片，不能先把现在的拆了、两头落空
-        guard await reach(window) != nil else { return }
+        guard await step("reach 读窗口") { await reach(window) } != nil else { return }
         // 原来那个、或上次没放回去的那个放不回去（App 卡住）就不放：两个窗口会叠在手机屏上，还原记录也只记得住一个
-        if let p = placement, await !returnToOriginal(p) {
+        if let p = placement, await !step("returnToOriginal 放回旧窗口") { await returnToOriginal(p) } {
             Log.warn("\(p.window.label) 放不回去，先不换成 \(window.label)")
             state.notice = .windowUnresponsive(app: p.window.app)
             return
         }
-        if let stuck = await putBackLeftover() {
+        if let stuck = await step("putBackLeftover 收拾留下的") { await putBackLeftover() } {
             Log.warn("\(stuck.label) 还放不回去，先不放 \(window.label)")
             state.notice = .windowUnresponsive(app: stuck.app)
             return
         }
         // 放回别的窗口可能动到它（上次没放回去的就是它），重新读
-        guard let look = await reach(window) else { return }
-        let known = Set(await windows.shownWindows(of: window.key.pid).map(\.key)).subtracting([window.key])
+        guard let look = await step("reach 再读窗口") { await reach(window) } else { return }
+        let known = Set(await step("shownWindows") { await windows.shownWindows(of: window.key.pid) }.map(\.key)).subtracting([window.key])
         // 先记账再动手。全屏的窗口这时读到的是全屏的位置，崩溃后按它放回再恢复全屏也对。
         // 它是留下的账的窗口、原样回来了（手机屏上关掉又在手机上重开）：接着用那笔账，原位还是当初的，字号按带回来的算
         let owed = leftBehind.match(window, frame: look.frame)
@@ -813,18 +822,21 @@ public final class PhoneDesk {
             leftBehind.remove(at: owed)
             saveLeftBehind()
         }
-        if look.minimized { await windows.setMinimized(window.key, false) }
+        if look.minimized { await step("setMinimized 还原") { await windows.setMinimized(window.key, false) } }
         if look.fullScreen {
-            await windows.setFullScreen(window.key, false)
+            await step("setFullScreen 退全屏") { await windows.setFullScreen(window.key, false) }
             // 退出全屏后的位置才是它平时的位置：放回时回到这里再进全屏
-            if let windowed = await windows.look(window.key)?.frame {
+            if let windowed = await step("look 读退全屏后位置") { await windows.look(window.key) }?.frame {
                 next.record.original = originalFrame(windowed, offPhone: id)
                 write(next.record)
             }
         }
         placement = next
         // 先按基准宽度铺，App 卡在自己的最小尺寸上时换档再铺；这时列表还盖着（「正在打开」）
-        guard let got = await fill(&next, on: id) else {
+        let fillStarted = timeline.now
+        let filled = await fill(&next, on: id)
+        if timeline.now - fillStarted >= 1 { Log.info("分步耗时：fill 铺窗口 \(String(format: "%.1f", timeline.now - fillStarted))s") }
+        guard let got = filled else {
             let notice = await unreachable(window)
             Log.warn("\(window.label) 挪不上手机屏（\(Self.reason(notice, gone: "刚关了"))），放回去")
             placement = nil
@@ -835,7 +847,7 @@ public final class PhoneDesk {
             return
         }
         placement = next
-        await windows.focus(window.key)
+        await step("focus") { await windows.focus(window.key) }
         state.listVisible = false
         let was = look.fullScreen ? "（原来全屏）" : look.minimized ? "（原来最小化）" : ""
         let took = String(format: "%.1f", timeline.now - started)

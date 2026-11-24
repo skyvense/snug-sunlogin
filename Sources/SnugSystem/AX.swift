@@ -100,7 +100,14 @@ public enum AX {
     static func element(for window: WindowKey) -> AXUIElement? {
         guard let visible = respondingWindows(pid: window.pid) else { return nil }
         if let hit = visible.first(where: { windowID($0) == window.id }) { return hit }
-        return remoteWindows(pid: window.pid, until: window.id).windows.first { windowID($0) == window.id }
+        // 诊断：走到远程扫描就是慢路径，记下花了多久、找没找到
+        let started = ProcessInfo.processInfo.systemUptime
+        let hit = remoteWindows(pid: window.pid, until: window.id).windows.first { windowID($0) == window.id }
+        let spent = ProcessInfo.processInfo.systemUptime - started
+        if spent >= 0.5 {
+            Log.info("按编号找窗口 pid \(window.pid) id \(window.id)：当前空间没有，远程扫描 \(String(format: "%.1f", spent))s，\(hit == nil ? "没找到" : "找到了")")
+        }
+        return hit
     }
 
     /// 当前显示着的桌面空间里的窗口（系统给的窗口列表，含最小化的）；App 没响应（或不支持辅助功能）返回 nil。
@@ -145,21 +152,37 @@ public enum AX {
         token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
         token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636F_636F)) { Data($0) })
         var found: [AXUIElement] = []
+        // 诊断：数试了多少个编号、总共花了多久，慢了记一行（见 logScan）
+        let scanStarted = ProcessInfo.processInfo.systemUptime
+        var probes = 0
         for elementID in UInt64(0)..<remoteScanLimit {
+            probes += 1
             token.replaceSubrange(12..<20, with: withUnsafeBytes(of: elementID) { Data($0) })
             guard let element = _AXUIElementCreateWithRemoteToken(token as CFData)?.takeRetainedValue() else { continue }
             AXUIElementSetMessagingTimeout(element, probeTimeout)
             var role: AnyObject?
             let result = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
             // 不存在的编号回 invalidUIElement（实测）；回 cannotComplete 是 App 中途卡住了，不再往下试
-            if result == .cannotComplete { return (found, false) }
+            if result == .cannotComplete {
+                logScan(pid: pid, probes: probes, found: found.count, started: scanStarted, reason: "App 中途卡住（cannotComplete）")
+                return (found, false)
+            }
             guard result == .success, role as? String == kAXWindowRole else { continue }
             // 找到了就改回全局超时：拿去挪窗口、切全屏时，App 慢一点也不至于当成没响应
             AXUIElementSetMessagingTimeout(element, 0)
             found.append(element)
             if let wanted, windowID(element) == wanted { break }
         }
+        logScan(pid: pid, probes: probes, found: found.count, started: scanStarted,
+                reason: wanted == nil ? "扫满 \(remoteScanLimit) 个编号" : "找到目标窗口或扫满")
         return (found, true)
+    }
+
+    /// 诊断：远程扫描慢才记一行——试了多少个编号、花了多久、找到几个窗口
+    private static func logScan(pid: pid_t, probes: Int, found: Int, started: TimeInterval, reason: String) {
+        let spent = ProcessInfo.processInfo.systemUptime - started
+        guard spent >= 0.5 else { return }
+        Log.info("远程扫描 pid \(pid)：\(reason)，试了 \(probes) 个编号、花了 \(String(format: "%.1f", spent))s，找到 \(found) 个窗口")
     }
 }
 

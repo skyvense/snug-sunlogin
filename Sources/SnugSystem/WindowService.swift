@@ -35,21 +35,21 @@ public final class WindowService: WindowControl {
     }
 
     public func look(_ window: WindowKey) async -> WindowLook? {
-        await run {
+        await run("look") {
             guard let element = AX.element(for: window), let frame = AX.frame(element) else { return nil }
             return WindowLook(frame: frame, fullScreen: AX.flag(element, AX.fullScreen), minimized: AX.flag(element, kAXMinimizedAttribute))
         }
     }
 
     public func move(_ window: WindowKey, to frame: CGRect) async -> CGRect? {
-        await run {
+        await run("move") {
             guard let element = AX.element(for: window) else { return nil }
             return Self.move(element, to: frame)
         }
     }
 
     public func setFullScreen(_ window: WindowKey, _ on: Bool) async {
-        await run {
+        await run("setFullScreen") {
             guard let element = AX.element(for: window) else { return }
             // 正在进出全屏的窗口不理这次设置：App 已有全屏窗口时新开的窗口出生就在进全屏，
             // 这时退出会被忽略（实测），没变过去就隔一拍再设，动画一走完就生效
@@ -64,14 +64,14 @@ public final class WindowService: WindowControl {
     }
 
     public func setMinimized(_ window: WindowKey, _ on: Bool) async {
-        await run {
+        await run("setMinimized") {
             guard let element = AX.element(for: window) else { return }
             Self.setMinimized(element, on)
         }
     }
 
     public func focus(_ window: WindowKey) async {
-        await run {
+        await run("focus") {
             guard let element = AX.element(for: window) else { return }
             if AX.flag(element, kAXMinimizedAttribute) { Self.setMinimized(element, false) }
             AX.raise(element)
@@ -84,7 +84,7 @@ public final class WindowService: WindowControl {
     }
 
     public func zoom(_ window: WindowKey, steps: Int) async -> Bool {
-        await run {
+        await run("zoom") {
             guard steps != 0 else { return true }
             guard let element = AX.element(for: window) else { return false }
             // 按键投给 App，App 交给它的当前窗口：先把这个窗口设成当前窗口
@@ -104,7 +104,7 @@ public final class WindowService: WindowControl {
 
     public func snapshot() async -> [WindowKey: CGRect] {
         let pids = await MainActor.run { AppService.regular().map(\.processIdentifier) }
-        return await run {
+        return await run("snapshot") {
             var frames: [WindowKey: CGRect] = [:]
             for pid in pids {
                 for element in AX.respondingWindows(pid: pid) ?? [] where AX.isStandard(element) && !AX.flag(element, kAXMinimizedAttribute) {
@@ -117,7 +117,7 @@ public final class WindowService: WindowControl {
     }
 
     public func restore(_ snapshot: [WindowKey: CGRect], except: WindowKey?) async {
-        await run {
+        await run("restore") {
             for (window, saved) in snapshot where window != except {
                 guard let element = AX.element(for: window), let now = AX.frame(element), !now.matches(saved) else { continue }
                 let got = Self.move(element, to: saved)
@@ -130,7 +130,7 @@ public final class WindowService: WindowControl {
     public func shownWindows(of pid: Int32) async -> [WindowInfo] {
         let shown = Set(Self.onScreen().filter { $0.pid == pid }.map(\.id))
         guard !shown.isEmpty, let app = Self.app(pid) else { return [] }
-        return await run {
+        return await run("shownWindows") {
             (AX.respondingWindows(pid: pid) ?? []).compactMap { element in
                 guard AX.isStandard(element), let id = AX.windowID(element), shown.contains(id) else { return nil }
                 return Self.info(element, key: WindowKey(pid: pid, id: id), of: app)
@@ -140,7 +140,7 @@ public final class WindowService: WindowControl {
 
     public func standardWindows(of pid: Int32) async -> [WindowInfo] {
         guard let app = Self.app(pid) else { return [] }
-        return await run {
+        return await run("standardWindows") {
             let all = (AX.respondingWindows(pid: pid) ?? []).compactMap { element -> WindowInfo? in
                 guard AX.isStandard(element), let id = AX.windowID(element) else { return nil }
                 return Self.info(element, key: WindowKey(pid: pid, id: id), of: app)
@@ -152,7 +152,7 @@ public final class WindowService: WindowControl {
 
     public func askingWindow(of pid: Int32) async -> WindowInfo? {
         guard let app = Self.app(pid) else { return nil }
-        return await run {
+        return await run("askingWindow") {
             for element in AX.respondingWindows(pid: pid) ?? [] where AX.isAsking(element) {
                 if let id = AX.windowID(element) { return Self.info(element, key: WindowKey(pid: pid, id: id), of: app) }
             }
@@ -161,7 +161,7 @@ public final class WindowService: WindowControl {
     }
 
     public func close(_ window: WindowKey) async -> Bool {
-        await run {
+        await run("close") {
             guard let element = AX.element(for: window),
                   let button = AX.attribute(element, kAXCloseButtonAttribute), CFGetTypeID(button) == AXUIElementGetTypeID()
             else { return false }
@@ -183,7 +183,7 @@ public final class WindowService: WindowControl {
     }
 
     public func closeButton(_ window: WindowKey) async -> CGRect? {
-        await run {
+        await run("closeButton") {
             guard let element = AX.element(for: window),
                   let button = AX.attribute(element, kAXCloseButtonAttribute), CFGetTypeID(button) == AXUIElementGetTypeID()
             else { return nil }
@@ -195,16 +195,26 @@ public final class WindowService: WindowControl {
 
     /// 给在跑的 App 补上窗口：不管在哪块屏、哪个桌面空间，全屏、最小化的也算。App 和窗口都按最近用过排
     public func withWindows(_ apps: [RunningApp]) async -> [RunningApp] {
-        await run {
+        await run("withWindows") {
             let now = ProcessInfo.processInfo.systemUptime
             let running = Set(apps.map(\.pid))
             self.remote.withLock { $0 = $0.filter { running.contains($0.key) } }
+            var perApp: [(name: String, spent: TimeInterval)] = []
             let filled = apps.map { app in
+                let t0 = ProcessInfo.processInfo.systemUptime
                 var app = app
                 app.windows = AX.allWindows(pid: app.pid) { self.remoteWindows(pid: app.pid, now: now) }
                     .filter(AX.isStandard)
                     .compactMap { element in AX.windowID(element).map { Self.info(element, key: WindowKey(pid: app.pid, id: $0), of: app.app) } }
+                perApp.append((app.app.name, ProcessInfo.processInfo.systemUptime - t0))
                 return app
+            }
+            // 诊断：补窗口整体慢时，把最慢的几个 App 点名（多半卡在某个 App 的远程扫描上）
+            let total = perApp.reduce(0) { $0 + $1.spent }
+            if total >= 2 {
+                let top = perApp.sorted { $0.spent > $1.spent }.prefix(5)
+                    .map { "\($0.name) \(String(format: "%.1f", $0.spent))s" }.joined(separator: "、")
+                Log.info("withWindows 给 \(apps.count) 个 App 补窗口共 \(String(format: "%.1f", total))s，最慢：\(top)")
             }
             return AppList.ordered(filled, frontToBack: Self.frontToBack())
         }
@@ -245,9 +255,19 @@ public final class WindowService: WindowControl {
         while !done(), ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.25) }
     }
 
-    private func run<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
-        await withCheckedContinuation { continuation in
-            queue.async { continuation.resume(returning: work()) }
+    /// 诊断：记下在队列里等了多久、执行了多久，慢了才打一行——放置卡住时先分清是排队还是执行慢
+    private func run<T: Sendable>(_ label: String = "未标名", _ work: @escaping @Sendable () -> T) async -> T {
+        let enqueued = ProcessInfo.processInfo.systemUptime
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                let started = ProcessInfo.processInfo.systemUptime
+                let value = work()
+                let done = ProcessInfo.processInfo.systemUptime
+                if started - enqueued >= 1 || done - started >= 2 {
+                    Log.info("窗口服务 \(label)：排队 \(String(format: "%.1f", started - enqueued))s、执行 \(String(format: "%.1f", done - started))s")
+                }
+                continuation.resume(returning: value)
+            }
         }
     }
 
@@ -261,8 +281,11 @@ public final class WindowService: WindowControl {
     /// 先改大小、再挪、再改大小，然后核对，对不上就重来。
     /// 位置对了、连着两次尺寸都一样，就是 App 限定了最小尺寸（系统设置、Safari……），再试也一样，不空等
     private static func move(_ element: AXUIElement, to target: CGRect) -> CGRect? {
+        let moveStarted = ProcessInfo.processInfo.systemUptime
         var got: CGRect?
+        var tries = 0
         for _ in 0..<maxTries {
+            tries += 1
             AX.setSize(element, target.size)
             AX.setPosition(element, target.origin)
             AX.setSize(element, target.size)
@@ -272,6 +295,11 @@ public final class WindowService: WindowControl {
             guard let now = got, !now.matches(target) else { break }
             let placed = abs(now.minX - target.minX) < 2 && abs(now.minY - target.minY) < 2
             if let previous, now.matches(previous), placed { break }
+        }
+        // 诊断：试了不止一次、或整体慢，才记一行（重试风暴时能看清每次的目标和结果）
+        let moveSpent = ProcessInfo.processInfo.systemUptime - moveStarted
+        if tries > 1 || moveSpent >= 2 {
+            Log.info("挪窗口试了 \(tries) 次、花了 \(String(format: "%.1f", moveSpent))s，目标 \(target.short)，结果 \(got?.short ?? "读不到")")
         }
         return got
     }
