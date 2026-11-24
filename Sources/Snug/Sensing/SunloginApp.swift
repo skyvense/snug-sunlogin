@@ -28,4 +28,27 @@ enum SunloginApp {
                 && (($0[kCGWindowLayer as String] as? Int) ?? 0) >= Sunlogin.overlayWindowMinimumLayer
         }
     }
+
+    /// 诊断用：把 向日葵 名下所有在屏窗口逐个描述出来（图层、 bounds、编号、窗口名），
+    /// 用来认出没被控时也常驻在屏、把 overlay 信号顶成真的到底是哪个窗口。只记日志，不参与判定
+    static func overlayWindowDescriptions() -> [String] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return list
+            .filter { ($0[kCGWindowOwnerName as String] as? String) == Sunlogin.overlayWindowOwner }
+            .map { w in
+                let layer = (w[kCGWindowLayer as String] as? Int) ?? -1
+                let number = (w[kCGWindowNumber as String] as? Int) ?? -1
+                let name = (w[kCGWindowName as String] as? String) ?? ""
+                var bounds = "?"
+                if let b = w[kCGWindowBounds as String] as? [String: Any],
+                   let x = b["X"] as? Double, let y = b["Y"] as? Double,
+                   let width = b["Width"] as? Double, let height = b["Height"] as? Double {
+                    bounds = "\(Int(width))x\(Int(height))@(\(Int(x)),\(Int(y)))"
+                }
+                return "layer=\(layer) #\(number) \(bounds) 名=\(name.isEmpty ? "（空）" : name)"
+            }
+            .sorted()
+    }
 }

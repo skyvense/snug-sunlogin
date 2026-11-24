@@ -17,10 +17,25 @@ final class SunloginSensor {
     func start() { captureLog.start() }
     func stop() { captureLog.stop() }
 
+    /// 上一拍记下的悬浮窗候选清单；只在集合变化时记一行，避免每拍刷屏
+    private var lastOverlayDump: [String] = []
+
     /// now 是墙钟：推流日志的时间戳是墙钟
     func sample(now: Date) -> SunloginSample {
         let capture = captureLog.sample(at: now)
-        return SunloginSample(signals: SunloginSignals(overlayVisible: SunloginApp.overlayVisible(),
+        let overlay = SunloginApp.overlayVisible()
+        // 诊断：overlay 为真时把命中的窗口清单记下来（变化才记），认出没被控时常驻的那个窗口
+        if overlay {
+            let dump = SunloginApp.overlayWindowDescriptions()
+            if dump != lastOverlayDump {
+                lastOverlayDump = dump
+                Log.info("悬浮窗候选（owner=AweSun 全部在屏窗口）：\(dump.joined(separator: "；"))")
+            }
+        } else if !lastOverlayDump.isEmpty {
+            lastOverlayDump = []
+            Log.info("悬浮窗候选清空")
+        }
+        return SunloginSample(signals: SunloginSignals(overlayVisible: overlay,
                                            controllers: controllers.poll(),
                                            captureActive: capture.active),
                         streamingDisplay: capture.display)
