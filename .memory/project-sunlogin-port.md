@@ -219,3 +219,12 @@ metadata:
 - **已发版 v2.7.1（2026-11-22 晚，机主批）**：feat/mac-i18n 快进合并 main（19080fe），VERSION 2.7.1，main CI 绿，tag v2.7.1；Release run 45006218482 两 job 全绿，六个资产逐个下载验 sha256 均 OK。feat/windows-app 已同步 main。机主未再提 mini 真机测，以 CI 渲染验证为准。
 - README 截图一节（b117903）：docs/images/ 放四张图——Windows 主窗口（ThinkBook 实机窗口级截图）、Windows 资源库（11-21 实机图）、Mac 设置与 Mac 资源库（CI 渲染图）。
 - ThinkBook 窗口级截图方法（capwin3.ps1，在 sunlogin-cli 工作区）：枚举进程顶层窗口 + CopyFromScreen；**必须先 SetProcessDpiAwarenessContext(-4)**，否则 GetWindowRect 是虚拟化坐标、截出来残缺。PrintWindow 对本 App 返回 false，只能 CopyFromScreen（窗口被遮挡会截到上层窗口）。awesun-cli 文件传输语法：`file transfer <session> -type up|down -local <路径> -remote <目录(up)/文件(down)> [-override]`（rfile.sh transfer 后面直接跟 flags）。注意：运行中的 SnugWindows 是提权进程，cmd 通道的 taskkill/WM_CLOSE 都被 UIPI 挡（Access denied）；桌面会话 Alt+F4 若焦点在桌面会弹关机对话框——别乱试。ThinkBook 上 SnugTest3\SnugWindows.exe 已换成 2.7.0 发布版 exe（哈希验过），旧测试版改名 .bak；但进程仍是旧构建（标题 v2.6.5，代码与发布版只差 VERSION 字符串），下次重启 App 即为发布版。
+
+## 2026-11-24 续 · 诊断日志取证完成：元凶实锤——向日葵自身进程的远程扫描一遍 31 秒
+
+- 机主在问题机本地编译 diag/mac-place-timing（基于 2.7.2 原版、只加分步日志）复现，日志（16:04–16:05）给出决定性证据：
+  - `远程扫描 pid 744：扫满 1000 个编号、花了 31.6s，找到 2 个窗口`；`远程扫描 pid 741：花了 30.6s，找到 0 个窗口`——单遍扫描约 31ms/个编号。
+  - `withWindows 给 12 个 App 补窗口共 62.9s，最慢：贝锐向日葵企业控制端 31.9s、向日葵企业版客户端 30.7s`，其余 App 均 ≤0.1s——**慢的正是向日葵自己的两个进程**（推流中答辅助功能调用慢；作者机上闲时测得十个 App 共 240ms，所以开发期从未暴露）。
+  - `窗口服务 shownWindows：排队 49.2s、执行 0.0s`——串行队列被扫描堵死的直接证据；备忘录「启动后 49.7s 出现」是等窗口的轮询在排队，队列一通、放置本身只花 0.3s。
+- 结论：此前 fix/mac-launcher-scan 的判断成立（扫描无上限 + 与挪窗共用队列 + 找窗口重复扫），且每 10 秒一轮的重扫会让队列在整个会话期间永远排不空，与 72.7s/139.7s 的放置耗时吻合。
+- 下一步待机主拍板：合并 fix/mac-launcher-scan 发 v2.7.3；诊断日志（阈值触发、正常时安静）建议保留进正式版，留作以后排障。
