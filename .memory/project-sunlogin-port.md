@@ -244,3 +244,5 @@ metadata:
 - 待机主确认：合并 main 发 v2.7.3。
 
 - 2026-11-24 16:17 机主定「先合并，暂不发版」：fix/mac-launcher-scan 快进合并进 main（2af6c99），feat/windows-app 已同步，main CI（45354810445）绿。VERSION 未动（仍 2.7.2）、未打 tag。发版 v2.7.3 待机主在问题机验证修复效果后再定。
+
+- **v2.7.3 已发布（2026-11-24 16:38）**：机主在问题机验证修复版「好多了」后拍板发版；Release run 45356164171 两 job 绿，六资产齐全，DMG 与 Windows zip 的 sha256 下载验过 OK，update.json 为 2.7.3。
