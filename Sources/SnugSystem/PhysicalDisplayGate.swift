@@ -37,6 +37,7 @@ public final class PhysicalDisplayGate {
 
     /// 连入且手机屏在线时调用：把手机屏之外的屏都关掉（已关的跳过）
     public func applyOnlyVirtual(phone: DisplayID) {
+        guard !reportedUnavailable else { return } // 机制已知不可用（见 setEnabled），别每拍重试
         let online = Self.onlineIDs()
         guard online.contains(phone) else { return } // 手机屏不在，绝不关别的屏
         let targets = online.filter { $0 != phone && !disabled.contains($0) }
@@ -78,6 +79,16 @@ public final class PhysicalDisplayGate {
 
     /// 下发启用/停用；机制不可用与调用失败分开记。返回是否下发成功（生效与否由调用方核对在线列表）
     private func setEnabled(_ id: DisplayID, _ on: Bool) -> Bool {
+        // 机制停用（2026-11-24 真机崩溃，报告 Snug-2026-11-24-172458.ips）：macOS 26 的 SkyLight 里
+        // CGSConfigureDisplayEnabled 已是 SLSConfigureDisplayEnabled，崩溃帧在 checkCapacity(CGSConfigData*)——
+        // 它第一个参数要的是显示配置对象，不是连接号，按连接号调直接段错误。真实签名核实前不许再调；
+        // 真被关掉的屏靠重启恢复（显示配置随 WindowServer 会话重置）
+        if !reportedUnavailable {
+            reportedUnavailable = true
+            Log.error("「仅输出手机屏」的停用机制与这台 macOS 的 SkyLight 不合（真机崩溃），已停用；若有屏还关着，重启 Mac 恢复")
+        }
+        return false
+        // swiftlint:disable:next unreachable_code —— 机制核实后恢复下面的调用
         switch SnugSetDisplayEnabled(id, on) {
         case 0: return true
         case 1:
