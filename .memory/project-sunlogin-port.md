@@ -219,3 +219,11 @@ metadata:
 - **已发版 v2.7.1（2026-11-22 晚，机主批）**：feat/mac-i18n 快进合并 main（19080fe），VERSION 2.7.1，main CI 绿，tag v2.7.1；Release run 45006218482 两 job 全绿，六个资产逐个下载验 sha256 均 OK。feat/windows-app 已同步 main。机主未再提 mini 真机测，以 CI 渲染验证为准。
 - README 截图一节（b117903）：docs/images/ 放四张图——Windows 主窗口（ThinkBook 实机窗口级截图）、Windows 资源库（11-21 实机图）、Mac 设置与 Mac 资源库（CI 渲染图）。
 - ThinkBook 窗口级截图方法（capwin3.ps1，在 sunlogin-cli 工作区）：枚举进程顶层窗口 + CopyFromScreen；**必须先 SetProcessDpiAwarenessContext(-4)**，否则 GetWindowRect 是虚拟化坐标、截出来残缺。PrintWindow 对本 App 返回 false，只能 CopyFromScreen（窗口被遮挡会截到上层窗口）。awesun-cli 文件传输语法：`file transfer <session> -type up|down -local <路径> -remote <目录(up)/文件(down)> [-override]`（rfile.sh transfer 后面直接跟 flags）。注意：运行中的 SnugWindows 是提权进程，cmd 通道的 taskkill/WM_CLOSE 都被 UIPI 挡（Access denied）；桌面会话 Alt+F4 若焦点在桌面会弹关机对话框——别乱试。ThinkBook 上 SnugTest3\SnugWindows.exe 已换成 2.7.0 发布版 exe（哈希验过），旧测试版改名 .bak；但进程仍是旧构建（标题 v2.6.5，代码与发布版只差 VERSION 字符串），下次重启 App 即为发布版。
+
+## 2026-11-24 · Mac 资源库慢：远程令牌扫描压垮串行队列（用户报告 + 日志实锤，修复待真机验证）
+
+- 用户报告（经机主转述）：某些版本下资源库加载不出运行中 App、点 App 后窗口约 1 分钟才挪过去；机主补充：问题机刚启动时加载已打开的 App 列表也要几分钟。
+- 问题机日志实锤（2026-11-24 15:37–15:43，Snug 2.7.2）：手机屏 15:37:46 就绪后，活动监视器一次放置耗时 **72.7s**、ToDesk 一次 **139.7s**（日志行内自带耗时）；活动监视器「启动后 14.5s 出现」也远超正常。
+- 根因（代码级）：找别的桌面空间的窗口靠远程令牌逐个编号扫 1000 次（AX.remoteWindows），App 答得慢时一遍几十秒；它原来压在三条关键路径上——①列表刷新首次给每个 App 同步现扫；②每 10 秒重扫与挪窗口共用 WindowService 单条串行队列；③place() 每次按编号找窗口（AX.element(for:)）都从头再扫，放一个窗口要找好几次。作者机上扫描快（十个 App 约 240ms）从未暴露；问题机上队列被扫描塞满，列表与每次放置的每一步都在排队。问题机为何单遍扫描慢（App 多/某些 App 答 AX 慢）未逐一取证，不影响修复方向。
+- 修复（分支 fix/mac-launcher-scan，提交见 git log）：AX.remoteWindows 加 3 秒时间上限（scanBudget，超时停下、已找到的照常缓存，cannotComplete 仍不缓存）；WindowService 列表刷新不再同步现扫——没缓存先返回空、扫描改走独立 scanQueue 后台跑、扫完下次刷新补上，周期重扫同理；element(for:) 从 AX 挪到 WindowService，先翻扫描缓存、没有才现扫一遍并存下。CI run 45350369755 绿（构建+全测+渲染）。
+- 待办：问题机真机验证（装分支构建，对比日志里「放上手机屏（…s）」应降到几秒内）；机主拍板后合并 main 发 v2.7.3。
