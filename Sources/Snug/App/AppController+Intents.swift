@@ -6,6 +6,8 @@ import SnugCore
 extension AppController: AppIntents {
     func setPhoneScreen(_ on: Bool) { changeConfig("手机屏 → \(on ? "开" : "关")") { $0.phoneScreen = on } }
 
+    func setOnlyVirtual(_ on: Bool) { changeConfig("仅输出手机屏 → \(on ? "开" : "关")") { $0.onlyVirtual = on } }
+
     func setLanguage(_ pref: LanguagePref) { changeConfig("界面语言 → \(pref.rawValue)") { $0.language = pref } }
 
     func setGestures(_ on: Bool) {

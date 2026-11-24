@@ -26,6 +26,8 @@ final class AppController: Sendable {
     let store: ConfigStore
     /// --preview-phone：不等手机连上就要手机屏
     private let previewPhone: Bool
+    /// 「仅输出手机屏」时关/恢复物理屏的开关（见 PhysicalDisplayGate）
+    private let gate: PhysicalDisplayGate
     private let sensor = SunloginSensor()
     private var session = RemoteSession()
     private let touch = TouchTap()
@@ -38,6 +40,7 @@ final class AppController: Sendable {
 
     init(paths: SnugPaths, previewPhone: Bool = false) {
         self.previewPhone = previewPhone
+        gate = PhysicalDisplayGate(paths: paths)
         store = ConfigStore(url: paths.config)
         let phones = Self.loadPhones()
         // 选过的机型按机型库现在的数值来（机型库改过数值时跟着改），建屏前就定下来
@@ -81,6 +84,8 @@ final class AppController: Sendable {
 
     /// 开始监控。有权限的话先把上次没放回去的窗口放回去
     func start() {
+        // 上次若把物理屏关着没恢复（崩溃/强退），先恢复再开始监控
+        gate.healOnLaunch()
         desk.onChange = { [weak self] phone in self?.phoneChanged(phone) }
         desk.onGone = { [weak self] gone in self?.catalog.forget(gone) }
         touch.onCloseWindow = { [weak self] window in self?.desk.closePlaced(window: window) }
@@ -114,6 +119,8 @@ final class AppController: Sendable {
         tickTimer = nil
         watcher?.stop()
         sensor.stop()
+        // 退出前把关着的物理屏恢复回来（恢复不回来的留在记录里，下次启动自愈）
+        gate.restore()
     }
 
     // MARK: 每拍
@@ -134,6 +141,13 @@ final class AppController: Sendable {
         if transitions.contains(.ended) { desk.setWanted(false) }
         desk.setWanted(wantsPhoneScreen)
         desk.setRemote(session.inEpisode)
+        // 「仅输出手机屏」对账：连着、手机屏在、开关开着，其余屏就关着；任一条件没了就恢复。
+        // 每拍对账而不只在边沿动手：中途插拔屏、会话中改开关都能自己跟上
+        if store.config.onlyVirtual, session.inEpisode, let phone = state.phone.display {
+            gate.applyOnlyVirtual(phone: phone)
+        } else if gate.isHolding {
+            gate.restore()
+        }
         if now.timeIntervalSince(lastVerifyAt) >= Self.verifyInterval {
             lastVerifyAt = now
             desk.verifyPlacement()

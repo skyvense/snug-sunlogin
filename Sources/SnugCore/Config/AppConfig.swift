@@ -12,6 +12,8 @@ public enum LanguagePref: String, Codable, Equatable, Sendable {
 public struct AppConfig: Codable, Equatable, Sendable {
     /// 总开关：用手机远程时加一块手机屏
     public var phoneScreen = true
+    /// 连入时仅输出手机屏：其余显示屏整块关掉，断开后恢复（同 Windows 版）。默认关
+    public var onlyVirtual = false
     /// 手机屏上把 向日葵 发来的单指操作翻译成 iPhone 的手势
     /// （在向日葵下有异常：暂时强制关闭——默认关、解码时不读存量值、设置页也开启不了；修好再恢复）
     public var gestures = false
@@ -35,7 +37,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case phoneScreen, gestures, screenshot, zoomSteps, phone, welcomed, updateSource, lastVersion, language
+        case phoneScreen, onlyVirtual, gestures, screenshot, zoomSteps, phone, welcomed, updateSource, lastVersion, language
     }
 
     // 每一项都有默认值：以后加字段、或者手改漏了某项，都不会让整份配置被判为损坏
@@ -43,6 +45,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = AppConfig()
         phoneScreen = try c.decodeIfPresent(Bool.self, forKey: .phoneScreen) ?? d.phoneScreen
+        onlyVirtual = try c.decodeIfPresent(Bool.self, forKey: .onlyVirtual) ?? d.onlyVirtual
         gestures = false // 强制关闭（见属性注释）：存量配置里开着的也不再生效
         screenshot = try c.decodeIfPresent(Bool.self, forKey: .screenshot) ?? d.screenshot
         zoomSteps = try c.decodeIfPresent(Int.self, forKey: .zoomSteps).map { $0.clamped(to: Self.zoomStepsRange) } ?? d.zoomSteps

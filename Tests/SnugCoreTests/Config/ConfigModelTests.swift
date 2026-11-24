@@ -8,6 +8,7 @@ struct ConfigModelTests {
     func defaults() {
         let c = AppConfig()
         #expect(c.phoneScreen)
+        #expect(!c.onlyVirtual)
         #expect(!c.gestures)
         #expect(!c.screenshot)
         #expect(c.zoomSteps == 2)
@@ -65,6 +66,7 @@ struct ConfigModelTests {
     func roundTrip() throws {
         var c = AppConfig()
         c.phoneScreen = false
+        c.onlyVirtual = true
         c.screenshot = true
         c.zoomSteps = 3
         c.welcomed = true

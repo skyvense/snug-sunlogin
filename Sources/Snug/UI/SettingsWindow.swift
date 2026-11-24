@@ -23,6 +23,10 @@ struct SettingsView: View {
                 Toggle(isOn: binding(\.config.phoneScreen, intents.setPhoneScreen)) {
                     SettingLabel(state.tr("手机屏", "Phone Screen"), detail: state.tr("向日葵 中增加竖屏", "Adds a portrait screen in Sunlogin"), symbol: "iphone", tint: .blue)
                 }
+                Toggle(isOn: binding(\.config.onlyVirtual, intents.setOnlyVirtual)) {
+                    SettingLabel(state.tr("仅输出手机屏", "Phone Screen Only"), detail: state.tr("连入时关掉其他显示屏，断开后恢复", "Turns off other displays while connected"), symbol: "display.slash", tint: .purple)
+                }
+                .disabled(!state.config.phoneScreen)
                 LabeledContent {
                     PhoneMenu(state: state, choose: intents.setPhone)
                 } label: {
