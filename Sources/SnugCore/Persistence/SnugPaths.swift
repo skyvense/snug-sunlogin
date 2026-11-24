@@ -26,6 +26,8 @@ public struct SnugPaths: Equatable, Sendable {
     public var zoomBook: URL { file("zoom.json") }
     /// 留下的账：在手机屏上被 Snug 之外关掉的窗口，等它回来时按账放回原位、缩回字号
     public var leftBehind: URL { file("left-behind.json") }
+    /// 「仅输出手机屏」关掉的物理屏清单：关之前写、恢复后删；崩溃后下次启动按它先恢复
+    public var onlyVirtualRecord: URL { file("only-virtual.json") }
 
     private func file(_ name: String) -> URL { dataDirectory.appendingPathComponent(name) }
 }
