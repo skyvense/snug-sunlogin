@@ -54,4 +54,11 @@ NS_ASSUME_NONNULL_BEGIN
 //  返回 0 成功、1 机制不可用（类不在或对象建不出来）、2 已下发但超时未生效
 NSInteger SnugSetDisplayRotation(CGDirectDisplayID displayID, NSInteger degrees);
 
+//  SkyLight 私有 API 声明：整块屏的启用/停用（停用后屏从在线列表消失，窗口由系统迁走）。
+//  公开 API 只有「设模式/镜像」，没有停用一块屏的入口；CGSConfigureDisplayEnabled 是
+//  DisableMonitor 等工具用的老路子。SkyLight 不在链接集合里，运行时 dlopen + dlsym 取函数
+//  （同 SnugSetDisplayRotation 运行时找类的思路，避免链接期符号）
+//  返回 0 成功、1 机制不可用（框架或符号不在）、2 调用失败
+NSInteger SnugSetDisplayEnabled(CGDirectDisplayID displayID, BOOL enabled);
+
 NS_ASSUME_NONNULL_END
