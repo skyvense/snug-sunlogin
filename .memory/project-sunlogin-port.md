@@ -250,3 +250,4 @@ metadata:
 - 机主要求：给 Mac 版也实现 Windows 版的「连入时仅输出虚拟屏」（关物理屏）。
 - 实现：桥接层 SnugSetDisplayEnabled 运行时从 SkyLight 取 CGSConfigureDisplayEnabled（公开 API 无此入口；符号不在返回不可用）；PhysicalDisplayGate 负责关/恢复——关之前先把屏清单落盘 only-virtual.json、启动 healOnLaunch 按记录自愈、每次下发后核对在线列表（没生效当作没关）；AppController 每拍对账（config.onlyVirtual && 会话中 && 手机屏在线 → 关其余屏；条件没了 → 恢复），退出时 stopMonitoring 也恢复；设置页开关「仅输出手机屏 / Phone Screen Only」（默认关，中英渲染图已验）。
 - CI 45357345812 绿（构建+测试+渲染）。**未验**：CGSConfigureDisplayEnabled 在 macOS 26 上是否真生效，只能真机测（机主装分支版、开开关、连入一次看物理屏是否熄、断开是否恢复；日志看「已关掉显示屏」行与在线列表核对结果）。
+- **v2.7.3 已发布（2026-11-24 16:38）**：机主在问题机验证修复版「好多了」后拍板发版；Release run 45356164171 两 job 绿，六资产齐全，DMG 与 Windows zip 的 sha256 下载验过 OK，update.json 为 2.7.3。
