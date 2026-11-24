@@ -97,12 +97,6 @@ public enum AX {
         return windows
     }
 
-    static func element(for window: WindowKey) -> AXUIElement? {
-        guard let visible = respondingWindows(pid: window.pid) else { return nil }
-        if let hit = visible.first(where: { windowID($0) == window.id }) { return hit }
-        return remoteWindows(pid: window.pid, until: window.id).windows.first { windowID($0) == window.id }
-    }
-
     /// 当前显示着的桌面空间里的窗口（系统给的窗口列表，含最小化的）；App 没响应（或不支持辅助功能）返回 nil。
     /// 这时不能再用远程令牌逐个去试：每个编号都要等一次超时，一千个编号就是好几分钟
     static func respondingWindows(pid: pid_t) -> [AXUIElement]? {
@@ -137,21 +131,27 @@ public enum AX {
         if let value = AXValueCreate(.cgSize, &s) { set(element, kAXSizeAttribute, value) }
     }
 
+    /// 一遍扫描最多花的时间：App 答得慢时每个编号都要等一会儿，一千个编号能拖到几分钟，必须封顶
+    static let scanBudget: TimeInterval = 3
+
     /// 用远程令牌按元素编号逐个构造辅助功能对象，找出 App 的窗口（AltTab 公开的做法，令牌 = pid + 0 + "coco" + 元素编号）。
     /// 含当前空间里的，调用方按窗口编号去重；给了 until 就找到那个窗口为止。
-    /// complete 为 false：试到一半 App 卡住了，结果不全（不该拿去当缓存）
-    static func remoteWindows(pid: pid_t, until wanted: UInt32? = nil) -> (windows: [AXUIElement], complete: Bool) {
+    /// cacheable 为 false 只有一种情况：试到一半 App 卡住了（cannotComplete），结果不全、不该拿去当缓存；
+    /// 扫满编号、或花满 scanBudget 停下时，找到的窗口都是真的，可以缓存（没扫到的下次再补）
+    static func remoteWindows(pid: pid_t, until wanted: UInt32? = nil) -> (windows: [AXUIElement], cacheable: Bool) {
         var token = Data(count: 20)
         token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
         token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636F_636F)) { Data($0) })
         var found: [AXUIElement] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + scanBudget
         for elementID in UInt64(0)..<remoteScanLimit {
+            if ProcessInfo.processInfo.systemUptime >= deadline { break }
             token.replaceSubrange(12..<20, with: withUnsafeBytes(of: elementID) { Data($0) })
             guard let element = _AXUIElementCreateWithRemoteToken(token as CFData)?.takeRetainedValue() else { continue }
             AXUIElementSetMessagingTimeout(element, probeTimeout)
             var role: AnyObject?
             let result = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-            // 不存在的编号回 invalidUIElement（实测）；回 cannotComplete 是 App 中途卡住了，不再往下试
+            // 不存在的编号回 invalidUIElement（实测）；回 cannotComplete 是 App 中途卡住了，不再往下试、结果也不缓存
             if result == .cannotComplete { return (found, false) }
             guard result == .success, role as? String == kAXWindowRole else { continue }
             // 找到了就改回全局超时：拿去挪窗口、切全屏时，App 慢一点也不至于当成没响应

@@ -1,7 +1,8 @@
 // 搬窗口、调字号：辅助功能接口 + 按 pid 投递的按键。
 // 辅助功能的调用会阻塞（App 卡住时每次最多等 1 秒），全部放在自己的串行队列上做，主线程不等。
 // 搬窗口时按「进程号 + 系统窗口编号」现找，不留辅助功能对象（App 重建窗口后旧对象会失效）；
-// 只有列表留着别的空间里找出来的对象，因为找一遍太贵（见 remoteWindows(pid:now:)）。
+// 别的空间里找出来的对象缓存在 remote 里，因为找一遍太贵（见 remoteWindows(pid:now:)），
+// 按编号找窗口时先翻缓存、没有才现扫（见 element(for:)）。
 // 不管窗口在哪块屏、哪个桌面空间、是否全屏或最小化都找得到（见 AX.allWindows）；
 // 窗口在不在问窗口服务器（exists），不经过 App：App 卡住时辅助功能读不到，不能当成窗口关了
 import AppKit
@@ -19,6 +20,8 @@ public final class WindowService: WindowControl {
     static let remoteRescanInterval: TimeInterval = 10
 
     private let queue = DispatchQueue(label: "io.github.skyvense.snugsunlogin.windows", qos: .userInitiated)
+    /// 远程令牌扫描单独一条队列：一遍最长几秒，不能排在挪窗口、读窗口这些用户正等着的操作前面
+    private let scanQueue = DispatchQueue(label: "io.github.skyvense.snugsunlogin.windows.scans", qos: .utility)
     /// 每个 App 用远程令牌试出来的窗口对象和试的时刻（单调时钟）。只在 queue 上读写
     private let remote = Locked<[pid_t: (windows: [AXUIElement], scannedAt: TimeInterval)]>([:])
 
@@ -36,21 +39,21 @@ public final class WindowService: WindowControl {
 
     public func look(_ window: WindowKey) async -> WindowLook? {
         await run {
-            guard let element = AX.element(for: window), let frame = AX.frame(element) else { return nil }
+            guard let element = self.element(for: window), let frame = AX.frame(element) else { return nil }
             return WindowLook(frame: frame, fullScreen: AX.flag(element, AX.fullScreen), minimized: AX.flag(element, kAXMinimizedAttribute))
         }
     }
 
     public func move(_ window: WindowKey, to frame: CGRect) async -> CGRect? {
         await run {
-            guard let element = AX.element(for: window) else { return nil }
+            guard let element = self.element(for: window) else { return nil }
             return Self.move(element, to: frame)
         }
     }
 
     public func setFullScreen(_ window: WindowKey, _ on: Bool) async {
         await run {
-            guard let element = AX.element(for: window) else { return }
+            guard let element = self.element(for: window) else { return }
             // 正在进出全屏的窗口不理这次设置：App 已有全屏窗口时新开的窗口出生就在进全屏，
             // 这时退出会被忽略（实测），没变过去就隔一拍再设，动画一走完就生效
             Self.wait(seconds: 5) {
@@ -65,14 +68,14 @@ public final class WindowService: WindowControl {
 
     public func setMinimized(_ window: WindowKey, _ on: Bool) async {
         await run {
-            guard let element = AX.element(for: window) else { return }
+            guard let element = self.element(for: window) else { return }
             Self.setMinimized(element, on)
         }
     }
 
     public func focus(_ window: WindowKey) async {
         await run {
-            guard let element = AX.element(for: window) else { return }
+            guard let element = self.element(for: window) else { return }
             if AX.flag(element, kAXMinimizedAttribute) { Self.setMinimized(element, false) }
             AX.raise(element)
         }
@@ -86,7 +89,7 @@ public final class WindowService: WindowControl {
     public func zoom(_ window: WindowKey, steps: Int) async -> Bool {
         await run {
             guard steps != 0 else { return true }
-            guard let element = AX.element(for: window) else { return false }
+            guard let element = self.element(for: window) else { return false }
             // 按键投给 App，App 交给它的当前窗口：先把这个窗口设成当前窗口
             AX.raise(element)
             let key = steps > 0 ? Self.equalKey : Self.minusKey
@@ -119,7 +122,7 @@ public final class WindowService: WindowControl {
     public func restore(_ snapshot: [WindowKey: CGRect], except: WindowKey?) async {
         await run {
             for (window, saved) in snapshot where window != except {
-                guard let element = AX.element(for: window), let now = AX.frame(element), !now.matches(saved) else { continue }
+                guard let element = self.element(for: window), let now = AX.frame(element), !now.matches(saved) else { continue }
                 let got = Self.move(element, to: saved)
                 Log.info("系统挪了 pid \(window.pid) 的窗口 \(now.short)，已放回 \(saved.short)"
                          + (got.map { $0.matches(saved) } == true ? "" : "（没对上，现在 \(got?.short ?? "?")）"))
@@ -162,7 +165,7 @@ public final class WindowService: WindowControl {
 
     public func close(_ window: WindowKey) async -> Bool {
         await run {
-            guard let element = AX.element(for: window),
+            guard let element = self.element(for: window),
                   let button = AX.attribute(element, kAXCloseButtonAttribute), CFGetTypeID(button) == AXUIElementGetTypeID()
             else { return false }
             return AX.press(button as! AXUIElement)
@@ -184,7 +187,7 @@ public final class WindowService: WindowControl {
 
     public func closeButton(_ window: WindowKey) async -> CGRect? {
         await run {
-            guard let element = AX.element(for: window),
+            guard let element = self.element(for: window),
                   let button = AX.attribute(element, kAXCloseButtonAttribute), CFGetTypeID(button) == AXUIElementGetTypeID()
             else { return nil }
             return AX.frame(button as! AXUIElement)
@@ -212,24 +215,45 @@ public final class WindowService: WindowControl {
 
     // MARK: 内部
 
-    /// 别的桌面空间里的窗口：试一遍是一千次跨进程调用（实测十个 App 约 240ms），列表每 1.5 秒刷一次时不能每次都试。
-    /// 试出来的对象记下来接着用（关掉的窗口读不到属性，自然掉出列表）。过了 remoteRescanInterval 先照旧用，
-    /// 排在这次列表后面再整个试一遍，找出这期间新开、又去了别的空间的窗口：列表一露出来就要快，不等这一遍
-    /// 试到一半 App 卡住时结果不全：不记、不覆盖旧的，不然它在别的空间里的窗口要从列表里消失一阵
+    /// 别的桌面空间里的窗口：试一遍是一千次跨进程调用，App 答得慢时能拖到几秒甚至更久，
+    /// 所以不在调用方身上现扫：没缓存就先返回空、后台扫完下次刷新自然补上；试出来的对象记下来
+    /// 接着用（关掉的窗口读不到属性，自然掉出列表）。过了 remoteRescanInterval 同理，先照旧用、
+    /// 后台再整个试一遍，找出这期间新开、又去了别的空间的窗口。扫描走自己的队列（rescan），
+    /// 不排在挪窗口这类用户正等着的操作前面。
+    /// 试到一半 App 卡住时结果不可缓存：不记、不覆盖旧的，不然它在别的空间里的窗口要从列表里消失一阵
     private func remoteWindows(pid: pid_t, now: TimeInterval) -> [AXUIElement] {
         guard let cached = remote.withLock({ $0[pid] }) else {
-            let scan = AX.remoteWindows(pid: pid)
-            if scan.complete { remote.withLock { $0[pid] = (scan.windows, now) } }
-            return scan.windows
+            rescan(pid: pid)
+            return []
         }
         if now - cached.scannedAt >= Self.remoteRescanInterval {
             remote.withLock { $0[pid]?.scannedAt = now }
-            queue.async { [remote] in
-                let scan = AX.remoteWindows(pid: pid)
-                if scan.complete { remote.withLock { $0[pid]?.windows = scan.windows } }
-            }
+            rescan(pid: pid)
         }
         return cached.windows
+    }
+
+    private func rescan(pid: pid_t) {
+        scanQueue.async { [remote] in
+            let scan = AX.remoteWindows(pid: pid)
+            guard scan.cacheable else { return }
+            remote.withLock { $0[pid] = (scan.windows, ProcessInfo.processInfo.systemUptime) }
+        }
+    }
+
+    /// 按进程号 + 窗口编号找辅助功能对象。窗口在当前桌面空间就直接命中；在别的空间先翻扫描缓存，
+    /// 缓存里没有才现扫一遍并存下：放一个窗口要找好几次（读状态、还原最小化、退全屏、挪），
+    /// 每次都从头扫的话，App 答得慢时一次点击能拖到一分钟
+    private func element(for window: WindowKey) -> AXUIElement? {
+        guard let visible = AX.respondingWindows(pid: window.pid) else { return nil }
+        if let hit = visible.first(where: { AX.windowID($0) == window.id }) { return hit }
+        if let cached = remote.withLock({ $0[window.pid] })?.windows,
+           let hit = cached.first(where: { AX.windowID($0) == window.id }) { return hit }
+        let scan = AX.remoteWindows(pid: window.pid, until: window.id)
+        if scan.cacheable {
+            remote.withLock { $0[window.pid] = (scan.windows, ProcessInfo.processInfo.systemUptime) }
+        }
+        return scan.windows.first { AX.windowID($0) == window.id }
     }
 
     /// 窗口服务器里这个窗口的信息；没有、或编号已经归了别的进程返回 nil
