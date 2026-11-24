@@ -143,23 +143,42 @@ public enum AX {
         token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
         token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636F_636F)) { Data($0) })
         var found: [AXUIElement] = []
-        let deadline = ProcessInfo.processInfo.systemUptime + scanBudget
+        // 诊断：数试了多少个编号、总共花了多久，慢了记一行（见 logScan）
+        let scanStarted = ProcessInfo.processInfo.systemUptime
+        let deadline = scanStarted + scanBudget
+        var probes = 0
         for elementID in UInt64(0)..<remoteScanLimit {
             if ProcessInfo.processInfo.systemUptime >= deadline { break }
+            probes += 1
             token.replaceSubrange(12..<20, with: withUnsafeBytes(of: elementID) { Data($0) })
             guard let element = _AXUIElementCreateWithRemoteToken(token as CFData)?.takeRetainedValue() else { continue }
             AXUIElementSetMessagingTimeout(element, probeTimeout)
             var role: AnyObject?
             let result = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
             // 不存在的编号回 invalidUIElement（实测）；回 cannotComplete 是 App 中途卡住了，不再往下试、结果也不缓存
-            if result == .cannotComplete { return (found, false) }
+            if result == .cannotComplete {
+                logScan(pid: pid, probes: probes, found: found.count, started: scanStarted, reason: "App 中途卡住（cannotComplete）")
+                return (found, false)
+            }
             guard result == .success, role as? String == kAXWindowRole else { continue }
             // 找到了就改回全局超时：拿去挪窗口、切全屏时，App 慢一点也不至于当成没响应
             AXUIElementSetMessagingTimeout(element, 0)
             found.append(element)
             if let wanted, windowID(element) == wanted { break }
         }
+        let reason: String
+        if probes >= Int(remoteScanLimit) { reason = "扫满 \(remoteScanLimit) 个编号" }
+        else if let wanted, found.contains(where: { windowID($0) == wanted }) { reason = "找到目标窗口" }
+        else { reason = "花满 \(Int(scanBudget)) 秒时间上限先停（已找到的先用）" }
+        logScan(pid: pid, probes: probes, found: found.count, started: scanStarted, reason: reason)
         return (found, true)
+    }
+
+    /// 诊断：远程扫描慢才记一行——试了多少个编号、花了多久、找到几个窗口
+    private static func logScan(pid: pid_t, probes: Int, found: Int, started: TimeInterval, reason: String) {
+        let spent = ProcessInfo.processInfo.systemUptime - started
+        guard spent >= 0.5 else { return }
+        Log.info("远程扫描 pid \(pid)：\(reason)，试了 \(probes) 个编号、花了 \(String(format: "%.1f", spent))s，找到 \(found) 个窗口")
     }
 }
 
